@@ -18,6 +18,7 @@ function Login() {
             if(result.success)
             {
                 localStorage.setItem("user",JSON.stringify(result.user));
+                localStorage.setItem("token",result.token);
                 navigate("/dashboard");
             }
         }

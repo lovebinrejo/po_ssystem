@@ -20,7 +20,7 @@ function Dashboard()
             </h1>
 
             <h1>
-            Welcome{user?.username}
+            Welcome {user?.username}
             </h1>
             <p>
                 Email:{user?.email}
