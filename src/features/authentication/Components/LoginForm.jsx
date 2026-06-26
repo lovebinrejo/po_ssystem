@@ -1,6 +1,9 @@
 import { User, KeyRound, Building2 } from "lucide-react";
 import Input from "../../../components/inputs/Input";
+import EntitySelect from "../../../components/inputs/EntitySelect";
 import Button from "../../../components/Buttons/Button";
+
+const ENTITY_OPTIONS = [{ id: 1, label: "Master entity" }];
 
 function LoginForm({
     email,
@@ -31,11 +34,11 @@ function LoginForm({
                     icon={<KeyRound size={18} />}
                     className="bg-[#fdf6e3] rounded-full"
                 />
-                <Input
-                    name="masterEntity"
-                    placeholder="Master entity"
+                <EntitySelect
+                    options={ENTITY_OPTIONS}
                     value={masterEntity}
-                    onchange={(e) => setMasterEntity(e.target.value)}
+                    onChange={setMasterEntity}
+                    placeholder="Master entity"
                     icon={<Building2 size={18} />}
                     className="bg-white border border-gray-300 rounded-full"
                 />
