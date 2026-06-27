@@ -1,12 +1,14 @@
 import { useState, useCallback } from "react";
 import { Menu, Search, ScanBarcode, ShoppingCart, Grid3x3 } from "lucide-react";
 import usePosStore from "../features/pos/stores/posStore";
+import ParallelSalesBar from "../features/pos/Components/ParallelSalesBar";
 import { BarcodeScannerModal } from "../features/barcodeScanner";
 
-function PosNavbar({ onToggleSidebar, onNewSale, onOpenCart }) {
+function PosNavbar({ onToggleSidebar, onOpenCart }) {
     const searchTerm = usePosStore((state) => state.searchTerm);
     const setSearchTerm = usePosStore((state) => state.setSearchTerm);
     const cart = usePosStore((state) => state.cart);
+    const createNewSale = usePosStore((state) => state.createNewSale);
     const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
     const [scannerOpen, setScannerOpen] = useState(false);
 
@@ -53,9 +55,12 @@ function PosNavbar({ onToggleSidebar, onNewSale, onOpenCart }) {
             </div>
 
             <div className="flex items-center gap-2 ml-auto shrink-0">
+                <ParallelSalesBar />
+
                 <button
                     type="button"
-                    onClick={onNewSale}
+                    onClick={createNewSale}
+                    title="Start a new parallel sale"
                     className="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600"
                 >
                     <ShoppingCart size={15} />

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
     Home,
     Moon,
@@ -15,6 +16,8 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "../context/ThemeContext";
 import useAuthStore from "../features/authentication/stores/authStore";
+import CashDeskModal from "../features/cash/Components/CashDeskModal";
+import ReportsModal from "../features/reports/Components/ReportsModal";
 
 function NavIcon({ icon: Icon, badge, onClick, title, className = "" }) {
     return (
@@ -41,6 +44,8 @@ function PosSidebar({ onLogout }) {
     const terminalConfig = useAuthStore((state) => state.terminalConfig);
     const terminalNumber = terminalConfig?.terminalNumber ?? terminalConfig?.terminal_number ?? 1;
     const userTitle = user ? `${user.fullname || user.login}${user.admin ? " | Administrator" : ""}` : "User";
+    const [cashDeskOpen, setCashDeskOpen] = useState(false);
+    const [reportsOpen, setReportsOpen] = useState(false);
 
     return (
         <aside className="w-14 bg-[var(--text-navy)] h-full overflow-y-auto shrink-0 flex flex-col">
@@ -48,8 +53,8 @@ function PosSidebar({ onLogout }) {
             <NavIcon icon={theme === "dark" ? Sun : Moon} title="Dark/Light Mode" onClick={toggleTheme} />
             <NavIcon icon={Grid3x3} title="Tables" />
             <NavIcon icon={BedDouble} title="Rooms" />
-            <NavIcon icon={Banknote} title="Close Cash Desk" />
-            <NavIcon icon={BarChart2} title="Reports" />
+            <NavIcon icon={Banknote} title="Close Cash Desk" onClick={() => setCashDeskOpen(true)} />
+            <NavIcon icon={BarChart2} title="Reports" onClick={() => setReportsOpen(true)} />
             <NavIcon icon={RefreshCw} title="Sync Data (Refresh Cache)" />
 
             <div className="mt-auto flex flex-col">
@@ -58,6 +63,9 @@ function PosSidebar({ onLogout }) {
                 <NavIcon icon={User} title={userTitle} />
                 <NavIcon icon={Power} title="Logout" onClick={onLogout} />
             </div>
+
+            <CashDeskModal open={cashDeskOpen} onClose={() => setCashDeskOpen(false)} />
+            <ReportsModal open={reportsOpen} onClose={() => setReportsOpen(false)} />
         </aside>
     );
 }

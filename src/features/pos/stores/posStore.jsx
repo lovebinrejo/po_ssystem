@@ -1,37 +1,125 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
-const usePosStore = create((set, get) => ({
-    cart: [],
-    searchTerm: "",
+// Mirrors legacy takeposnew's parallel-sales time format (pos-state.js getCurrentTime): HH:MM
+const getCurrentTime = () => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+};
 
-    setSearchTerm: (searchTerm) => set({ searchTerm }),
+const usePosStore = create(
+    persist(
+        (set, get) => ({
+            searchTerm: "",
 
-    addToCart: (product) => {
-        const existing = get().cart.find((item) => item.id === product.id);
-        if (existing) {
-            set({
-                cart: get().cart.map((item) =>
-                    item.id === product.id ? { ...item, qty: item.qty + 1 } : item
-                ),
-            });
-        } else {
-            set({ cart: [...get().cart, { ...product, qty: 1 }] });
+            // Each "sale" is an independent cart the cashier can switch between without
+            // losing progress (e.g. serving multiple customers/tables at once) — same
+            // `place` concept the legacy POS uses for table/parallel-sale invoice refs.
+            sales: [{ place: "0", time: getCurrentTime() }],
+            activePlace: "0",
+            cartsByPlace: { "0": [] },
+            cart: [],
+
+            setSearchTerm: (searchTerm) => set({ searchTerm }),
+
+            addToCart: (product, qty = 1) => {
+                const place = get().activePlace;
+                const currentCart = get().cartsByPlace[place] || [];
+                const existing = currentCart.find((item) => item.id === product.id);
+                const updatedCart = existing
+                    ? currentCart.map((item) => (item.id === product.id ? { ...item, qty: item.qty + qty } : item))
+                    : [...currentCart, { ...product, qty }];
+
+                set({ cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart }, cart: updatedCart });
+            },
+
+            changeQty: (id, delta) => {
+                const place = get().activePlace;
+                const updatedCart = (get().cartsByPlace[place] || [])
+                    .map((item) => (item.id === id ? { ...item, qty: item.qty + delta } : item))
+                    .filter((item) => item.qty > 0);
+
+                set({ cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart }, cart: updatedCart });
+            },
+
+            removeFromCart: (id) => {
+                const place = get().activePlace;
+                const updatedCart = (get().cartsByPlace[place] || []).filter((item) => item.id !== id);
+
+                set({ cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart }, cart: updatedCart });
+            },
+
+            updateCartItem: (id, updates) => {
+                const place = get().activePlace;
+                const updatedCart = (get().cartsByPlace[place] || []).map((item) =>
+                    item.id === id ? { ...item, ...updates } : item
+                );
+
+                set({ cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart }, cart: updatedCart });
+            },
+
+            clearCart: () => {
+                const place = get().activePlace;
+                set({ cartsByPlace: { ...get().cartsByPlace, [place]: [] }, cart: [] });
+            },
+
+            // Opens a new, independent sale (legacy: createNewParallelSale) and switches to it.
+            createNewSale: () => {
+                const { sales, cartsByPlace } = get();
+                const newPlace = `0-${sales.length}`;
+                set({
+                    sales: [...sales, { place: newPlace, time: getCurrentTime() }],
+                    cartsByPlace: { ...cartsByPlace, [newPlace]: [] },
+                    activePlace: newPlace,
+                    cart: [],
+                });
+                return newPlace;
+            },
+
+            // Swaps the active cart without losing the one being left (legacy: switchPlace).
+            switchSale: (place) => {
+                set({ activePlace: place, cart: get().cartsByPlace[place] || [] });
+            },
+
+            // Discards a parallel sale. Legacy only protects place '0' (the main
+            // sale) from deletion — any other sale can always be closed.
+            deleteSale: (place) => {
+                const { sales, activePlace, cartsByPlace } = get();
+                if (place === "0") return false;
+
+                const remainingSales = sales.filter((sale) => sale.place !== place);
+                const remainingCarts = { ...cartsByPlace };
+                delete remainingCarts[place];
+
+                if (activePlace === place) {
+                    const nextPlace = "0";
+                    set({
+                        sales: remainingSales,
+                        cartsByPlace: remainingCarts,
+                        activePlace: nextPlace,
+                        cart: remainingCarts[nextPlace] || [],
+                    });
+                } else {
+                    set({ sales: remainingSales, cartsByPlace: remainingCarts });
+                }
+                return true;
+            },
+        }),
+        {
+            // Mirrors legacy's localStorage persistence (takepos_parallel_sales,
+            // takepos_place, takepos_cart_place_*) so a page refresh doesn't lose
+            // in-progress parallel sales.
+            name: "pos_standalone_sales",
+            partialize: (state) => ({
+                sales: state.sales,
+                activePlace: state.activePlace,
+                cartsByPlace: state.cartsByPlace,
+            }),
+            onRehydrateStorage: () => (state) => {
+                if (state) state.cart = state.cartsByPlace[state.activePlace] || [];
+            },
         }
-    },
-
-    changeQty: (id, delta) => {
-        set({
-            cart: get()
-                .cart.map((item) => (item.id === id ? { ...item, qty: item.qty + delta } : item))
-                .filter((item) => item.qty > 0),
-        });
-    },
-
-    removeFromCart: (id) => {
-        set({ cart: get().cart.filter((item) => item.id !== id) });
-    },
-
-    clearCart: () => set({ cart: [] }),
-}));
+    )
+);
 
 export default usePosStore;

@@ -17,6 +17,9 @@ const normalizeProduct = (product) => ({
     stock: product.stock,
     categoryId: product.category_id,
     available: product.available,
+    unit: product.unit_label,
+    hasUom: product.has_uom,
+    uomUnits: product.uom_units || [],
 });
 
 export const fetchProducts = async ({ categoryId, search } = {}) => {
