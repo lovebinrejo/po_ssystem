@@ -19,8 +19,17 @@ const usePosStore = create(
             activePlace: "0",
             cartsByPlace: { "0": [] },
             cart: [],
+            toast: null,
 
             setSearchTerm: (searchTerm) => set({ searchTerm }),
+
+            showToast: (message) => {
+                const id = Date.now();
+                set({ toast: { id, message } });
+                setTimeout(() => {
+                    if (get().toast?.id === id) set({ toast: null });
+                }, 2500);
+            },
 
             addToCart: (product, qty = 1) => {
                 const place = get().activePlace;
@@ -31,6 +40,7 @@ const usePosStore = create(
                     : [...currentCart, { ...product, qty }];
 
                 set({ cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart }, cart: updatedCart });
+                get().showToast(`Added ${product.name} to cart`);
             },
 
             changeQty: (id, delta) => {

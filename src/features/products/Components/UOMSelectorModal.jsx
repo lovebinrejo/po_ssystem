@@ -31,13 +31,13 @@ function UOMSelectorModal({ product, onClose, onConfirm }) {
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="w-full max-w-md max-h-[90vh] overflow-y-auto soft-scrollbar rounded-2xl bg-white dark:bg-slate-900 text-gray-900 dark:text-white shadow-2xl">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-slate-700">
+                <div className="flex items-center justify-between px-5 py-2.5 bg-[#2c6291] rounded-t-2xl text-white">
                     <div className="flex items-center gap-2 text-base font-semibold">
                         <Boxes size={18} />
                         Select Unit of Measure
                     </div>
-                    <button type="button" onClick={onClose} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-slate-700">
-                        <X size={20} className="text-red-500" />
+                    <button type="button" onClick={onClose} className="p-1 rounded hover:bg-white/20">
+                        <X size={20} />
                     </button>
                 </div>
 

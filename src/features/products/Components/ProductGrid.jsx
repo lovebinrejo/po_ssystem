@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Info, Minus, Plus } from "lucide-react";
+import { Info, Minus, PackageSearch, Plus } from "lucide-react";
 import UOMSelectorModal from "./UOMSelectorModal";
 
 // Mirrors takeposnew/js/pos-app.js renderProductCard(): same palette, same
@@ -60,12 +60,13 @@ function ProductTile({ product, onAddToCart, onDecrement }) {
                 <div className="text-xs sm:text-sm text-gray-900 dark:text-white">{product.price.toFixed(2)} ZMW</div>
             </div>
 
-            <div className="flex justify-end items-center gap-1 sm:gap-2 px-1.5 sm:px-3 pb-1.5 sm:pb-3 pt-1">
+            <div className="flex justify-end items-center gap-1.5 sm:gap-2 px-1.5 sm:px-3 pb-1.5 sm:pb-3 pt-1">
                 <button
                     type="button"
                     disabled={isOutOfStock}
                     onClick={() => onDecrement(product.id)}
-                    className="p-1.5 sm:p-2.5 rounded-md border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+                    aria-label="Decrease quantity"
+                    className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center rounded-full bg-gray-200 dark:bg-slate-600 text-gray-700 dark:text-slate-100 shadow-sm cursor-pointer transition-all hover:bg-gray-300 dark:hover:bg-slate-500 active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gray-200 dark:disabled:hover:bg-slate-600"
                 >
                     <Minus size={12} className="sm:hidden" />
                     <Minus size={14} className="hidden sm:block" />
@@ -74,8 +75,8 @@ function ProductTile({ product, onAddToCart, onDecrement }) {
                     type="button"
                     disabled={isOutOfStock}
                     onClick={() => onAddToCart(product)}
-                    className="p-1.5 sm:p-2.5 rounded-md border border-emerald-500 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 disabled:opacity-40"
                     aria-label="Add to cart"
+                    className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center rounded-full text-white bg-emerald-500 shadow-sm shadow-emerald-500/30 cursor-pointer transition-all hover:bg-emerald-600 hover:shadow-md hover:shadow-emerald-500/40 active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:bg-gray-300 dark:disabled:bg-gray-600"
                 >
                     <Plus size={13} className="sm:hidden" />
                     <Plus size={16} className="hidden sm:block" />
@@ -99,6 +100,42 @@ const buildCartLine = (product, unit) =>
               unit: unit.label,
           };
 
+function TileSkeleton() {
+    return (
+        <div className="rounded-xl sm:rounded-2xl overflow-hidden bg-white dark:bg-[#1e293b] shadow animate-pulse">
+            <div className="w-full h-20 sm:h-28 lg:h-32 bg-gray-200 dark:bg-slate-700" />
+            <div className="px-1.5 sm:px-3 pt-1.5 sm:pt-3 flex flex-col gap-1.5 sm:gap-2">
+                <div className="h-3 w-3/4 rounded bg-gray-200 dark:bg-slate-700" />
+                <div className="h-3 w-1/2 rounded bg-gray-200 dark:bg-slate-700" />
+            </div>
+            <div className="flex justify-end items-center gap-1 sm:gap-2 px-1.5 sm:px-3 pb-1.5 sm:pb-3 pt-2">
+                <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-md bg-gray-200 dark:bg-slate-700" />
+                <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-md bg-gray-200 dark:bg-slate-700" />
+            </div>
+        </div>
+    );
+}
+
+export function ProductGridSkeleton({ count = 12 }) {
+    return (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:[grid-template-columns:repeat(auto-fill,minmax(180px,1fr))] gap-2 sm:gap-3">
+            {Array.from({ length: count }).map((_, i) => (
+                <TileSkeleton key={i} />
+            ))}
+        </div>
+    );
+}
+
+function EmptyProductsState() {
+    return (
+        <div className="col-span-full flex flex-col items-center justify-center text-center py-12 sm:py-20 text-gray-400 dark:text-slate-500">
+            <PackageSearch size={48} className="mb-3 opacity-60" />
+            <p className="text-sm sm:text-base font-medium text-gray-500 dark:text-slate-400">No products in this category</p>
+            <p className="text-xs sm:text-sm mt-1">Try another category or clear the search</p>
+        </div>
+    );
+}
+
 function ProductGrid({ products, onAddToCart, onDecrement }) {
     const [uomProduct, setUomProduct] = useState(null);
 
@@ -113,6 +150,10 @@ function ProductGrid({ products, onAddToCart, onDecrement }) {
     const handleUomConfirm = (product, unit, qty) => {
         onAddToCart(buildCartLine(product, unit), qty);
     };
+
+    if (products.length === 0) {
+        return <EmptyProductsState />;
+    }
 
     return (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:[grid-template-columns:repeat(auto-fill,minmax(180px,1fr))] gap-2 sm:gap-3">

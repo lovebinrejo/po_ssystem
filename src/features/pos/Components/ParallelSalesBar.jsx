@@ -20,12 +20,15 @@ function ParallelSalesBar() {
                 const canDelete = sale.place !== "0";
 
                 return (
+                    // No vertical translate on hover here — the navbar sits flush at the
+                    // top of an overflow-hidden layout, so any upward shift clips the
+                    // badge/cancel button against that boundary.
                     <div key={sale.place} className="relative group shrink-0">
                         <button
                             type="button"
                             onClick={() => switchSale(sale.place)}
                             title={`Sale started at ${sale.time}${itemCount > 0 ? ` - ${itemCount} items` : ""}`}
-                            className={`flex items-center gap-1.5 px-3 h-9 rounded-lg text-xs font-medium shadow transition-all hover:-translate-y-0.5 ${
+                            className={`flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium shadow cursor-pointer ${
                                 isActive ? "bg-slate-500 text-white font-semibold" : "bg-white text-gray-700 hover:bg-gray-100"
                             }`}
                         >
@@ -35,7 +38,8 @@ function ParallelSalesBar() {
 
                         {itemCount > 0 && (
                             <span
-                                className={`absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full text-[9px] leading-4 text-center border-2 border-white ${
+                                title={`${itemCount} item${itemCount === 1 ? "" : "s"} in this sale`}
+                                className={`absolute -top-1 -left-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold leading-[18px] text-center border-2 border-white shadow-sm pointer-events-none ${
                                     isActive ? "bg-amber-400 text-blue-900" : "bg-red-500 text-white"
                                 }`}
                             >
@@ -53,9 +57,9 @@ function ParallelSalesBar() {
                                     }
                                 }}
                                 title="Cancel sale"
-                                className="absolute -top-1.5 -right-1.5 w-4 h-4 flex items-center justify-center rounded-full bg-red-500 border-2 border-white opacity-80 group-hover:opacity-100 transition-opacity"
+                                className="absolute -top-1 -right-1 w-5 h-5 flex items-center justify-center rounded-full bg-red-600 border-2 border-white shadow-sm cursor-pointer opacity-0 group-hover:opacity-100 hover:scale-110 transition-all"
                             >
-                                <X size={9} className="text-white" />
+                                <X size={11} className="text-white" />
                             </button>
                         )}
                     </div>

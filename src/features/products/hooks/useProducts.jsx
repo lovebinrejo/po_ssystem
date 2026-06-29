@@ -1,30 +1,35 @@
 import { useEffect, useState } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { fetchProducts } from "../services/productApi";
 
-export const useProducts = ({ categoryId, search } = {}) => {
-    const [products, setProducts] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
+// Debounce the search term before it hits the query key, so typing doesn't
+// fire one request per keystroke (was the main cause of the product grid
+// flickering while a cashier typed).
+const useDebouncedValue = (value, delay) => {
+    const [debounced, setDebounced] = useState(value);
 
     useEffect(() => {
-        let cancelled = false;
-        setLoading(true);
+        const handle = setTimeout(() => setDebounced(value), delay);
+        return () => clearTimeout(handle);
+    }, [value, delay]);
 
-        fetchProducts({ categoryId, search })
-            .then((data) => {
-                if (!cancelled) setProducts(data);
-            })
-            .catch((err) => {
-                if (!cancelled) setError(err.response?.data?.message || "Failed to load products");
-            })
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
+    return debounced;
+};
 
-        return () => {
-            cancelled = true;
-        };
-    }, [categoryId, search]);
+export const useProducts = ({ categoryId, search } = {}) => {
+    const debouncedSearch = useDebouncedValue(search, 300);
 
-    return { products, loading, error };
+    const { data, isLoading, error } = useQuery({
+        queryKey: ["products", categoryId ?? "all", debouncedSearch ?? ""],
+        queryFn: () => fetchProducts({ categoryId, search: debouncedSearch }),
+        // Keeps showing the previous category/search's products while the new
+        // ones load, instead of unmounting the grid to a blank "Loading..." state.
+        placeholderData: keepPreviousData,
+    });
+
+    return {
+        products: data ?? [],
+        loading: isLoading,
+        error: error ? error.response?.data?.message || error.message || "Failed to load products" : "",
+    };
 };

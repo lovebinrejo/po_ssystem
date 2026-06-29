@@ -21,22 +21,22 @@ function PosNavbar({ onToggleSidebar, onOpenCart }) {
     );
 
     return (
-        <nav className="flex items-center gap-3 h-14 px-3 bg-[#2c6291]">
+        <nav className="flex items-center gap-3 h-11 px-3 bg-[#2c6291]">
             <button
                 type="button"
                 onClick={onToggleSidebar}
-                className="w-9 h-9 flex items-center justify-center rounded-lg bg-black/20 text-white hover:bg-black/30 shrink-0"
+                className="w-8 h-8 flex items-center justify-center rounded-lg bg-black/20 text-white hover:bg-black/30 shrink-0"
             >
-                <Menu size={20} />
+                <Menu size={18} />
             </button>
 
             <div className="flex items-center gap-1.5 text-white font-bold tracking-wide shrink-0">
-                <Grid3x3 size={20} />
+                <Grid3x3 size={18} />
                 <span>ECUENTA</span>
             </div>
 
-            <div className="flex-1 flex items-center gap-2 max-w-xs bg-white rounded-lg px-3 py-2">
-                <Search size={16} className="text-[#397db9]" />
+            <div className="flex-1 flex items-center gap-2 max-w-xs bg-white rounded-lg px-3 py-1.5">
+                <Search size={14} className="text-[#397db9]" />
                 <input
                     type="text"
                     placeholder="Search products..."
@@ -50,7 +50,7 @@ function PosNavbar({ onToggleSidebar, onOpenCart }) {
                     onClick={() => setScannerOpen(true)}
                     className="text-[#397db9] hover:text-[#2c6291] shrink-0"
                 >
-                    <ScanBarcode size={18} />
+                    <ScanBarcode size={16} />
                 </button>
             </div>
 
@@ -61,19 +61,19 @@ function PosNavbar({ onToggleSidebar, onOpenCart }) {
                     type="button"
                     onClick={createNewSale}
                     title="Start a new parallel sale"
-                    className="flex items-center gap-1.5 px-3 h-9 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600"
+                    className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600"
                 >
-                    <ShoppingCart size={15} />
+                    <ShoppingCart size={14} />
                     New Sale
                 </button>
 
                 <button
                     type="button"
                     onClick={onOpenCart}
-                    className="relative w-9 h-9 flex items-center justify-center rounded-full bg-black/20 text-white hover:bg-black/30"
+                    className="relative w-8 h-8 flex items-center justify-center rounded-full bg-black/20 text-white hover:bg-black/30"
                 >
-                    <ShoppingCart size={17} />
-                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full text-[10px] leading-4 text-white text-center bg-gray-900">
+                    <ShoppingCart size={15} />
+                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold leading-[18px] text-white text-center bg-red-500 border-2 border-white shadow-sm">
                         {cartCount}
                     </span>
                 </button>

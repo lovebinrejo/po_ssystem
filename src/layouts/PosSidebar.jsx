@@ -18,6 +18,8 @@ import { useTheme } from "../context/ThemeContext";
 import useAuthStore from "../features/authentication/stores/authStore";
 import CashDeskModal from "../features/cash/Components/CashDeskModal";
 import ReportsModal from "../features/reports/Components/ReportsModal";
+import RoomsModal from "../features/tables/Components/RoomsModal";
+import TablesModal from "../features/tables/Components/TablesModal";
 
 function NavIcon({ icon: Icon, badge, onClick, title, className = "" }) {
     return (
@@ -46,13 +48,15 @@ function PosSidebar({ onLogout }) {
     const userTitle = user ? `${user.fullname || user.login}${user.admin ? " | Administrator" : ""}` : "User";
     const [cashDeskOpen, setCashDeskOpen] = useState(false);
     const [reportsOpen, setReportsOpen] = useState(false);
+    const [roomsOpen, setRoomsOpen] = useState(false);
+    const [tablesOpen, setTablesOpen] = useState(false);
 
     return (
         <aside className="w-14 bg-[var(--text-navy)] h-full overflow-y-auto shrink-0 flex flex-col">
             <NavIcon icon={Home} title="Home" onClick={() => navigate("/pos")} />
             <NavIcon icon={theme === "dark" ? Sun : Moon} title="Dark/Light Mode" onClick={toggleTheme} />
-            <NavIcon icon={Grid3x3} title="Tables" />
-            <NavIcon icon={BedDouble} title="Rooms" />
+            <NavIcon icon={Grid3x3} title="Tables" onClick={() => setTablesOpen(true)} />
+            <NavIcon icon={BedDouble} title="Rooms" onClick={() => setRoomsOpen(true)} />
             <NavIcon icon={Banknote} title="Close Cash Desk" onClick={() => setCashDeskOpen(true)} />
             <NavIcon icon={BarChart2} title="Reports" onClick={() => setReportsOpen(true)} />
             <NavIcon icon={RefreshCw} title="Sync Data (Refresh Cache)" />
@@ -66,6 +70,8 @@ function PosSidebar({ onLogout }) {
 
             <CashDeskModal open={cashDeskOpen} onClose={() => setCashDeskOpen(false)} />
             <ReportsModal open={reportsOpen} onClose={() => setReportsOpen(false)} />
+            <RoomsModal open={roomsOpen} onClose={() => setRoomsOpen(false)} />
+            <TablesModal open={tablesOpen} onClose={() => setTablesOpen(false)} />
         </aside>
     );
 }

@@ -3,8 +3,9 @@ import usePosStore from "../stores/posStore";
 import { useCategories } from "../../categories/hooks/useCategories";
 import { useProducts } from "../../products/hooks/useProducts";
 import CategoryTabs from "../../categories/Components/CategoryTabs";
-import ProductGrid from "../../products/Components/ProductGrid";
+import ProductGrid, { ProductGridSkeleton } from "../../products/Components/ProductGrid";
 import CartPanel from "../../cart/Components/CartPanel";
+import CartToast from "./CartToast";
 
 function PosHome() {
     const cart = usePosStore((state) => state.cart);
@@ -39,7 +40,7 @@ function PosHome() {
                 )}
                 <div className="flex-1 min-h-0 overflow-y-auto soft-scrollbar">
                     {loading ? (
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Loading products...</p>
+                        <ProductGridSkeleton />
                     ) : (
                         <ProductGrid
                             products={products}
@@ -51,6 +52,7 @@ function PosHome() {
             </div>
 
             <CartPanel cart={cart} onChangeQty={changeQty} onRemove={removeFromCart} total={total} />
+            <CartToast />
         </div>
     );
 }

@@ -4,6 +4,7 @@
 const MOCK_TABLES = Array.from({ length: 12 }, (_, i) => ({
     id: i + 1,
     label: `Table ${i + 1}`,
+    occupied: (i + 1) % 4 === 0,
 }));
 
 export const fetchTables = async () => MOCK_TABLES;

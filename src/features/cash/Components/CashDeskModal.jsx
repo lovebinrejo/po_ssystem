@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Landmark, X } from "lucide-react";
 import useAuthStore from "../../authentication/stores/authStore";
 import { getActiveSession, getTheoreticalAmount, openSession, closeSession } from "../services/cashApi";
@@ -15,12 +16,35 @@ const toCreationDateTime = (dateCreation) => {
     return Number.isNaN(date.getTime()) ? dateCreation : date.toLocaleString();
 };
 
+const cashDeskQueryKey = (terminal) => ["cashDesk", terminal];
+
+const fetchCashDesk = async (terminal) => {
+    const res = await getActiveSession(terminal);
+    if (!res.success) throw new Error(res.error || "Failed to load cash session");
+    if (res.session) {
+        return { session: res.session, summary: res.summary, theoreticalAmount: null };
+    }
+    const theoRes = await getTheoreticalAmount(terminal);
+    return {
+        session: null,
+        summary: null,
+        theoreticalAmount: theoRes.success ? theoRes.theoretical_amount : 0,
+    };
+};
+
 function CashDeskModal({ open, onClose }) {
     const terminalNumber = useAuthStore((state) => state.terminalConfig?.terminalNumber) || 1;
+    const queryClient = useQueryClient();
 
-    const [loading, setLoading] = useState(true);
-    const [session, setSession] = useState(null);
-    const [summary, setSummary] = useState(null);
+    const { data, isLoading, error: queryError } = useQuery({
+        queryKey: cashDeskQueryKey(terminalNumber),
+        queryFn: () => fetchCashDesk(terminalNumber),
+        enabled: open,
+    });
+
+    const session = data?.session ?? null;
+    const summary = data?.summary ?? null;
+
     const [openingAmount, setOpeningAmount] = useState("0.00");
     const [closingCash, setClosingCash] = useState("0.00");
     const [closingCheque, setClosingCheque] = useState("0.00");
@@ -28,32 +52,27 @@ function CashDeskModal({ open, onClose }) {
     const [error, setError] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
+    // Only re-seed the editable fields when the underlying session changes
+    // (not on every background refetch), so in-progress edits aren't clobbered.
+    const seededSessionId = useRef(null);
     useEffect(() => {
-        if (!open) return;
-        setError("");
-        setLoading(true);
+        if (!data) return;
+        const sessionId = session?.id ?? null;
+        if (seededSessionId.current === sessionId) return;
+        seededSessionId.current = sessionId;
 
-        getActiveSession(terminalNumber)
-            .then((res) => {
-                if (!res.success) throw new Error(res.error || "Failed to load cash session");
-                if (res.session) {
-                    // summary now comes back inline with the session in one round-trip
-                    // instead of a second getSummary request (was adding ~1s to open the modal).
-                    setSession(res.session);
-                    setSummary(res.summary);
-                    setClosingCash(res.summary.expected_amount.toFixed(2));
-                    setClosingCheque(res.summary.cheque_sales.toFixed(2));
-                    setClosingCard(res.summary.card_sales.toFixed(2));
-                    return undefined;
-                }
-                setSession(null);
-                return getTheoreticalAmount(terminalNumber).then((theoRes) => {
-                    if (theoRes.success) setOpeningAmount(theoRes.theoretical_amount.toFixed(2));
-                });
-            })
-            .catch((err) => setError(err.message))
-            .finally(() => setLoading(false));
-    }, [open, terminalNumber]);
+        if (session && summary) {
+            setClosingCash(summary.expected_amount.toFixed(2));
+            setClosingCheque(summary.cheque_sales.toFixed(2));
+            setClosingCard(summary.card_sales.toFixed(2));
+        } else {
+            setOpeningAmount((data.theoreticalAmount ?? 0).toFixed(2));
+        }
+    }, [data, session, summary]);
+
+    useEffect(() => {
+        if (open) setError("");
+    }, [open]);
 
     if (!open) return null;
 
@@ -63,6 +82,7 @@ function CashDeskModal({ open, onClose }) {
         try {
             const res = await openSession(terminalNumber, parseFloat(openingAmount) || 0);
             if (!res.success) throw new Error(res.error || "Failed to open cash session");
+            await queryClient.invalidateQueries({ queryKey: cashDeskQueryKey(terminalNumber) });
             onClose();
         } catch (err) {
             setError(err.message);
@@ -81,6 +101,7 @@ function CashDeskModal({ open, onClose }) {
                 closingCard: parseFloat(closingCard) || 0,
             });
             if (!res.success) throw new Error(res.error || "Failed to close cash session");
+            await queryClient.invalidateQueries({ queryKey: cashDeskQueryKey(terminalNumber) });
             onClose();
         } catch (err) {
             setError(err.message);
@@ -89,10 +110,14 @@ function CashDeskModal({ open, onClose }) {
         }
     };
 
+    // Skeleton only on the very first load for this terminal (no cached data yet).
+    // Reopening with cached data renders instantly while react-query refetches quietly.
+    const showSkeleton = isLoading && !data;
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto soft-scrollbar rounded-xl bg-white dark:bg-slate-900 text-gray-900 dark:text-white shadow-2xl">
-                <div className="flex items-center justify-between px-5 py-4 bg-blue-600 dark:bg-blue-700 rounded-t-xl text-white">
+                <div className="flex items-center justify-between px-5 py-2.5 bg-[#2c6291] rounded-t-xl text-white">
                     <div className="flex items-center gap-2 text-base font-semibold uppercase tracking-wide">
                         <Landmark size={18} />
                         {session ? "POS Cash Desk Control" : "POS Cash Desk Control - New"}
@@ -103,12 +128,14 @@ function CashDeskModal({ open, onClose }) {
                 </div>
 
                 <div className="px-5 py-4 space-y-4">
-                    {error && (
-                        <p className="text-sm text-red-600 bg-red-50 dark:bg-red-500/10 rounded-lg px-3 py-2">{error}</p>
+                    {(error || queryError) && (
+                        <p className="text-sm text-red-600 bg-red-50 dark:bg-red-500/10 rounded-lg px-3 py-2">
+                            {error || queryError.message}
+                        </p>
                     )}
 
-                    {loading ? (
-                        <p className="text-sm text-gray-500 dark:text-slate-400">Loading cash session...</p>
+                    {showSkeleton ? (
+                        <CashDeskSkeleton />
                     ) : session ? (
                         <>
                             <div className="rounded-lg border border-gray-200 dark:border-slate-700 p-3 text-sm space-y-2">
@@ -222,7 +249,7 @@ function CashDeskModal({ open, onClose }) {
                     >
                         Cancel
                     </button>
-                    {!loading && (
+                    {!showSkeleton && (
                         <button
                             type="button"
                             disabled={submitting}
@@ -235,6 +262,46 @@ function CashDeskModal({ open, onClose }) {
                 </div>
             </div>
         </div>
+    );
+}
+
+function Bar({ className = "" }) {
+    return <div className={`animate-pulse rounded bg-gray-200 dark:bg-slate-700 ${className}`} />;
+}
+
+function CashDeskSkeleton() {
+    return (
+        <>
+            <div className="rounded-lg border border-gray-200 dark:border-slate-700 p-3 space-y-3">
+                <div className="flex justify-between">
+                    <Bar className="h-4 w-16" />
+                    <Bar className="h-4 w-14" />
+                </div>
+                {Array.from({ length: 7 }).map((_, i) => (
+                    <div key={i} className="flex justify-between">
+                        <Bar className="h-3.5 w-28" />
+                        <Bar className="h-3.5 w-20" />
+                    </div>
+                ))}
+            </div>
+
+            <div className="rounded-lg border border-gray-200 dark:border-slate-700 overflow-hidden">
+                <div className="bg-gray-50 dark:bg-slate-800 px-3 py-2">
+                    <Bar className="h-4 w-52" />
+                </div>
+                <div className="px-3 py-3 space-y-3">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                        <div key={i} className="flex justify-between gap-3">
+                            <Bar className="h-3.5 w-24" />
+                            <Bar className="h-3.5 flex-1" />
+                            <Bar className="h-3.5 flex-1" />
+                            <Bar className="h-3.5 flex-1" />
+                            <Bar className="h-3.5 flex-1" />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </>
     );
 }
 

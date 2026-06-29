@@ -1,29 +1,16 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { fetchCategories } from "../services/categoryApi";
 
 export const useCategories = () => {
-    const [categories, setCategories] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
+    const { data, isLoading, error } = useQuery({
+        queryKey: ["categories"],
+        queryFn: fetchCategories,
+        staleTime: 5 * 60_000,
+    });
 
-    useEffect(() => {
-        let cancelled = false;
-
-        fetchCategories()
-            .then((data) => {
-                if (!cancelled) setCategories(data);
-            })
-            .catch((err) => {
-                if (!cancelled) setError(err.response?.data?.message || "Failed to load categories");
-            })
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
-
-        return () => {
-            cancelled = true;
-        };
-    }, []);
-
-    return { categories, loading, error };
+    return {
+        categories: data ?? [],
+        loading: isLoading,
+        error: error ? error.response?.data?.message || error.message || "Failed to load categories" : "",
+    };
 };

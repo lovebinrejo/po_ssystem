@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Armchair, Check, X } from "lucide-react";
 import { useTables } from "../hooks/useTables";
 import useTableStore from "../stores/tableStore";
 
@@ -14,33 +14,54 @@ function TableSelectorModal({ onClose }) {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-            <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl w-full max-w-md p-5">
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-gray-900 dark:text-white font-semibold">Select a table</h3>
-                    <button onClick={onClose} className="text-gray-400 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white">
+            <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl w-full max-w-md overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-2.5 bg-[#2c6291] text-white">
+                    <h3 className="font-semibold">Select a table</h3>
+                    <button onClick={onClose} className="p-1 rounded hover:bg-white/20">
                         <X size={18} />
                     </button>
                 </div>
 
-                {loading ? (
-                    <p className="text-sm text-gray-500 dark:text-slate-400">Loading tables...</p>
-                ) : (
-                    <div className="grid grid-cols-3 gap-3">
-                        {tables.map((table) => (
-                            <button
-                                key={table.id}
-                                onClick={() => handleSelect(table)}
-                                className={`py-3 rounded-lg text-sm font-medium border transition-colors ${
-                                    selectedTable?.id === table.id
-                                        ? "bg-blue-600 border-blue-500 text-white"
-                                        : "bg-gray-100 dark:bg-slate-800 border-gray-300 dark:border-slate-700 text-gray-700 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-700"
-                                }`}
-                            >
-                                {table.label}
-                            </button>
-                        ))}
-                    </div>
-                )}
+                <div className="p-5">
+                    {loading ? (
+                        <div className="grid grid-cols-3 gap-3">
+                            {Array.from({ length: 9 }).map((_, i) => (
+                                <div key={i} className="h-[78px] rounded-xl bg-gray-100 dark:bg-slate-800 animate-pulse" />
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-3 gap-3">
+                            {tables.map((table) => {
+                                const isSelected = selectedTable?.id === table.id;
+                                return (
+                                    <button
+                                        key={table.id}
+                                        onClick={() => handleSelect(table)}
+                                        disabled={table.occupied}
+                                        className={`relative flex flex-col items-center justify-center gap-1 py-3.5 rounded-xl border-2 text-sm font-medium transition-all ${
+                                            isSelected
+                                                ? "bg-[#2c6291] border-[#2c6291] text-white shadow-md shadow-[#2c6291]/30"
+                                                : table.occupied
+                                                ? "bg-gray-50 dark:bg-slate-800/60 border-gray-200 dark:border-slate-700 text-gray-400 dark:text-slate-500 cursor-not-allowed"
+                                                : "bg-gray-50 dark:bg-slate-800 border-gray-200 dark:border-slate-600 text-gray-700 dark:text-slate-100 hover:-translate-y-0.5 hover:border-[#2c6291] hover:shadow-md cursor-pointer"
+                                        }`}
+                                    >
+                                        {isSelected && (
+                                            <span className="absolute -top-2 -right-2 w-5 h-5 flex items-center justify-center rounded-full bg-emerald-500 border-2 border-white dark:border-slate-900">
+                                                <Check size={11} className="text-white" />
+                                            </span>
+                                        )}
+                                        <Armchair size={20} className={isSelected ? "text-white" : table.occupied ? "text-gray-400 dark:text-slate-500" : "text-[#2c6291] dark:text-blue-300"} />
+                                        {table.label}
+                                        <span className="text-[9px] uppercase tracking-wide opacity-75">
+                                            {table.occupied ? "Occupied" : "Available"}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );
