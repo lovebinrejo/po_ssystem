@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import LoginForm from "./LoginForm";
 import { useLogin } from "../hooks/useLogin";
+import { isTokenExpired } from "../../../utils/jwt";
 import SocialIcon from "../../../components/SocialIcon";
 import logo from "../../../assets/Ecuenta_logo_png.png";
 import panelBg from "../../../assets/img.png";
@@ -18,6 +19,13 @@ function Login() {
     const [masterEntity, setMasterEntity] = useState(1);
     const navigate = useNavigate();
     const { login, error } = useLogin();
+
+    useEffect(() => {
+        const token = localStorage.getItem("token");
+        if (token && !isTokenExpired(token)) {
+            navigate("/pos", { replace: true });
+        }
+    }, [navigate]);
 
     const handleLogin = async () => {
         try {

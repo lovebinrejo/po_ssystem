@@ -23,7 +23,9 @@ function ProductTile({ product, onAddToCart, onDecrement }) {
     const showImage = product.image && !imgError;
 
     return (
-        <div className="rounded-xl sm:rounded-2xl overflow-hidden bg-white dark:bg-[#1e293b] shadow hover:-translate-y-0.5 transition-transform">
+        <div
+            onDoubleClick={() => !isOutOfStock && onAddToCart(product)}
+            className="rounded-xl sm:rounded-2xl overflow-hidden bg-white dark:bg-[#1e293b] shadow hover:-translate-y-0.5 transition-transform cursor-pointer">
             <div className="relative">
                 {showImage ? (
                     <img

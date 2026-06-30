@@ -29,17 +29,17 @@ function ParallelSalesBar() {
                             onClick={() => switchSale(sale.place)}
                             title={`Sale started at ${sale.time}${itemCount > 0 ? ` - ${itemCount} items` : ""}`}
                             className={`flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium shadow cursor-pointer ${
-                                isActive ? "bg-slate-500 text-white font-semibold" : "bg-white text-gray-700 hover:bg-gray-100"
+                                isActive ? "bg-blue-500 text-white font-semibold" : "bg-slate-700 text-white hover:bg-slate-600"
                             }`}
                         >
-                            <ShoppingCart size={14} className={isActive ? "text-white" : "text-indigo-500"} />
+                            <ShoppingCart size={14} className="text-white" />
                             {sale.time}
                         </button>
 
                         {itemCount > 0 && (
                             <span
                                 title={`${itemCount} item${itemCount === 1 ? "" : "s"} in this sale`}
-                                className={`absolute -top-1 -left-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold leading-[18px] text-center border-2 border-white shadow-sm pointer-events-none ${
+                                className={`absolute -top-1 -left-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold leading-[18px] text-center border-2 border-[var(--text-navy)] shadow-sm pointer-events-none ${
                                     isActive ? "bg-amber-400 text-blue-900" : "bg-red-500 text-white"
                                 }`}
                             >
@@ -57,7 +57,7 @@ function ParallelSalesBar() {
                                     }
                                 }}
                                 title="Cancel sale"
-                                className="absolute -top-1 -right-1 w-5 h-5 flex items-center justify-center rounded-full bg-red-600 border-2 border-white shadow-sm cursor-pointer opacity-0 group-hover:opacity-100 hover:scale-110 transition-all"
+                                className="absolute -top-1 -right-1 w-5 h-5 flex items-center justify-center rounded-full bg-red-600 border-2 border-[var(--text-navy)] shadow-sm cursor-pointer opacity-0 group-hover:opacity-100 hover:scale-110 transition-all"
                             >
                                 <X size={11} className="text-white" />
                             </button>

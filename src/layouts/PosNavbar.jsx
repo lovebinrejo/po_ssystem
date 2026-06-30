@@ -21,7 +21,7 @@ function PosNavbar({ onToggleSidebar, onOpenCart }) {
     );
 
     return (
-        <nav className="flex items-center gap-3 h-11 px-3 bg-[#2c6291]">
+        <nav className="flex items-center gap-3 h-11 px-3 bg-[var(--text-navy)]">
             <button
                 type="button"
                 onClick={onToggleSidebar}
@@ -61,7 +61,7 @@ function PosNavbar({ onToggleSidebar, onOpenCart }) {
                     type="button"
                     onClick={createNewSale}
                     title="Start a new parallel sale"
-                    className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600"
+                    className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-slate-700 text-white text-sm font-medium hover:bg-slate-600"
                 >
                     <ShoppingCart size={14} />
                     New Sale
@@ -70,10 +70,10 @@ function PosNavbar({ onToggleSidebar, onOpenCart }) {
                 <button
                     type="button"
                     onClick={onOpenCart}
-                    className="relative w-8 h-8 flex items-center justify-center rounded-full bg-black/20 text-white hover:bg-black/30"
+                    className="relative w-9 h-8 flex items-center justify-center rounded-lg bg-slate-700 text-white hover:bg-slate-600"
                 >
                     <ShoppingCart size={15} />
-                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold leading-[18px] text-white text-center bg-red-500 border-2 border-white shadow-sm">
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold leading-[18px] text-white text-center bg-blue-500 border-2 border-[var(--text-navy)] shadow-sm">
                         {cartCount}
                     </span>
                 </button>

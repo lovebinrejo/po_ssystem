@@ -1,19 +1,35 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Landmark, X } from "lucide-react";
+import { Landmark, User, X } from "lucide-react";
 import useAuthStore from "../../authentication/stores/authStore";
+import usePosStore from "../../pos/stores/posStore";
 import { getActiveSession, getTheoreticalAmount, openSession, closeSession } from "../services/cashApi";
 
+// The backend returns date_creation as a naive "YYYY-MM-DD HH:MM:SS" string
+// (the server's MySQL/Dolibarr datetime, stored in UTC) with no timezone
+// marker. `new Date()` on a string with no "Z"/offset assumes it's already in
+// the BROWSER's local time, so without explicitly marking it UTC here, the
+// raw UTC value gets mislabeled as local time instead of being converted —
+// e.g. showing "10:49" when the real local time is "16:19". Legacy avoids
+// this by using a Unix timestamp instead (unambiguous), which is what this
+// mirrors: parse as UTC, then let toLocaleString()/toLocaleDateString()
+// correctly convert to the browser's local timezone for display.
+const toUtcDate = (dateCreation) => {
+    if (!dateCreation) return null;
+    let normalized = String(dateCreation).includes("T") ? dateCreation : String(dateCreation).replace(" ", "T");
+    if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(normalized)) normalized += "Z";
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
 const toPeriod = (dateCreation) => {
-    if (!dateCreation) return "";
-    return String(dateCreation).slice(0, 10);
+    const date = toUtcDate(dateCreation);
+    return date ? date.toLocaleDateString("en-CA") : "";
 };
 
 const toCreationDateTime = (dateCreation) => {
-    if (!dateCreation) return "";
-    const normalized = String(dateCreation).includes("T") ? dateCreation : String(dateCreation).replace(" ", "T");
-    const date = new Date(normalized);
-    return Number.isNaN(date.getTime()) ? dateCreation : date.toLocaleString();
+    const date = toUtcDate(dateCreation);
+    return date ? date.toLocaleString() : String(dateCreation || "");
 };
 
 const cashDeskQueryKey = (terminal) => ["cashDesk", terminal];
@@ -32,8 +48,11 @@ const fetchCashDesk = async (terminal) => {
     };
 };
 
-function CashDeskModal({ open, onClose }) {
+function CashDeskModal({ open, onClose, onLogout }) {
     const terminalNumber = useAuthStore((state) => state.terminalConfig?.terminalNumber) || 1;
+    const user = useAuthStore((state) => state.user);
+    const setCashSessionOpen = usePosStore((state) => state.setCashSessionOpen);
+    const showToast = usePosStore((state) => state.showToast);
     const queryClient = useQueryClient();
 
     const { data, isLoading, error: queryError } = useQuery({
@@ -45,7 +64,7 @@ function CashDeskModal({ open, onClose }) {
     const session = data?.session ?? null;
     const summary = data?.summary ?? null;
 
-    const [openingAmount, setOpeningAmount] = useState("0.00");
+    const [openingAmount, setOpeningAmount] = useState("");
     const [closingCash, setClosingCash] = useState("0.00");
     const [closingCheque, setClosingCheque] = useState("0.00");
     const [closingCard, setClosingCard] = useState("0.00");
@@ -65,8 +84,6 @@ function CashDeskModal({ open, onClose }) {
             setClosingCash(summary.expected_amount.toFixed(2));
             setClosingCheque(summary.cheque_sales.toFixed(2));
             setClosingCard(summary.card_sales.toFixed(2));
-        } else {
-            setOpeningAmount((data.theoreticalAmount ?? 0).toFixed(2));
         }
     }, [data, session, summary]);
 
@@ -82,8 +99,10 @@ function CashDeskModal({ open, onClose }) {
         try {
             const res = await openSession(terminalNumber, parseFloat(openingAmount) || 0);
             if (!res.success) throw new Error(res.error || "Failed to open cash session");
+            setCashSessionOpen(true);
             await queryClient.invalidateQueries({ queryKey: cashDeskQueryKey(terminalNumber) });
             onClose();
+            showToast("💰 Cash drawer opened successfully - POS is now active");
         } catch (err) {
             setError(err.message);
         } finally {
@@ -101,8 +120,10 @@ function CashDeskModal({ open, onClose }) {
                 closingCard: parseFloat(closingCard) || 0,
             });
             if (!res.success) throw new Error(res.error || "Failed to close cash session");
+            setCashSessionOpen(false);
             await queryClient.invalidateQueries({ queryKey: cashDeskQueryKey(terminalNumber) });
             onClose();
+            showToast("Cash drawer closed - POS operations disabled");
         } catch (err) {
             setError(err.message);
         } finally {
@@ -122,9 +143,11 @@ function CashDeskModal({ open, onClose }) {
                         <Landmark size={18} />
                         {session ? "POS Cash Desk Control" : "POS Cash Desk Control - New"}
                     </div>
-                    <button type="button" onClick={onClose} className="p-1 rounded hover:bg-white/20">
-                        <X size={20} />
-                    </button>
+                    {session && (
+                        <button type="button" onClick={onClose} className="p-1 rounded hover:bg-white/20">
+                            <X size={20} />
+                        </button>
+                    )}
                 </div>
 
                 <div className="px-5 py-4 space-y-4">
@@ -150,9 +173,17 @@ function CashDeskModal({ open, onClose }) {
                                 <Row label="Period:" value={toPeriod(session.date_creation)} />
                                 <Row label="Creat. Date:" value={toCreationDateTime(session.date_creation)} />
                                 <Row label="Initial Balance - Cash:" value={`${session.opening.toFixed(2)} ZMW`} />
-                                <Row label="Cash:" value={`${session.cash.toFixed(2)} ZMW`} />
-                                <Row label="Cheque:" value={`${session.cheque.toFixed(2)} ZMW`} />
-                                <Row label="Credit Card:" value={`${session.card.toFixed(2)} ZMW`} />
+                                {summary && (
+                                    <>
+                                        {/* Mirrors legacy's populateClosingForm(): these rows bind to the
+                                            live computed sales-to-date (summary.*_sales), not the raw
+                                            session.cash/cheque/card columns — those stay 0 until the
+                                            session is actually closed. */}
+                                        <Row label="Cash:" value={`${summary.cash_sales.toFixed(2)} ZMW`} />
+                                        <Row label="Cheque:" value={`${summary.cheque_sales.toFixed(2)} ZMW`} />
+                                        <Row label="Credit Card:" value={`${summary.card_sales.toFixed(2)} ZMW`} />
+                                    </>
+                                )}
                             </div>
 
                             {summary && (
@@ -219,21 +250,49 @@ function CashDeskModal({ open, onClose }) {
                             )}
                         </>
                     ) : (
-                        <div className="space-y-3">
-                            <p className="text-sm text-gray-500 dark:text-slate-400">
-                                No cash session is open for Terminal {terminalNumber} today. Enter the opening float to start one.
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Terminal</label>
+                                    <input
+                                        disabled
+                                        value={`Terminal ${terminalNumber}`}
+                                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-gray-50 dark:bg-slate-800 text-gray-400 dark:text-slate-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1">Date</label>
+                                    <input
+                                        readOnly
+                                        value={new Date().toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}
+                                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-[var(--text-navy)] text-white"
+                                    />
+                                </div>
+                            </div>
+
+                            <p className="text-sm text-gray-500 dark:text-slate-400 flex items-center gap-1.5">
+                                <User size={14} /> User: <span className="font-semibold text-gray-700 dark:text-slate-200">{user?.fullname || user?.login}</span>
                             </p>
+
                             <div>
-                                <label className="block text-sm font-medium mb-1">Initial Balance (Cash)</label>
-                                <div className="flex items-center gap-2">
-                                    <span className="px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 text-sm text-gray-600 dark:text-slate-300">
-                                        ZMW
-                                    </span>
+                                <h3 className="text-sm font-bold text-[var(--text-navy)] dark:text-white mb-3">Initial Balance</h3>
+                                <label className="block text-sm mb-2">Cash</label>
+
+                                <div className="grid grid-cols-3 items-center gap-2 mb-2">
+                                    <span className="text-sm text-gray-600 dark:text-slate-300">Theorical Amount</span>
+                                    <div className="col-span-2 rounded-lg bg-[var(--text-navy)] text-white text-right px-3 py-2 text-sm">
+                                        {(data?.theoreticalAmount ?? 0).toFixed(2)}
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-3 items-center gap-2">
+                                    <span className="text-sm text-gray-600 dark:text-slate-300">Real Amount</span>
                                     <input
                                         type="number"
+                                        placeholder="0.00"
                                         value={openingAmount}
                                         onChange={(e) => setOpeningAmount(e.target.value)}
-                                        className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 outline-none focus:border-blue-500"
+                                        className="col-span-2 rounded-lg bg-[var(--text-navy)] text-white text-right px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400 placeholder:text-white/50"
                                     />
                                 </div>
                             </div>
@@ -242,19 +301,31 @@ function CashDeskModal({ open, onClose }) {
                 </div>
 
                 <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200 dark:border-slate-700">
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-700"
-                    >
-                        Cancel
-                    </button>
+                    {session ? (
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-700"
+                        >
+                            Cancel
+                        </button>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={onLogout}
+                            className="px-4 py-2 rounded-lg text-sm font-medium bg-[#397db9] text-white hover:bg-[#2c6291]"
+                        >
+                            Logout
+                        </button>
+                    )}
                     {!showSkeleton && (
                         <button
                             type="button"
                             disabled={submitting}
                             onClick={session ? handleCloseSession : handleOpenSession}
-                            className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
+                            className={`px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50 ${
+                                session ? "bg-emerald-600 hover:bg-emerald-700" : "bg-[#397db9] hover:bg-[#2c6291]"
+                            }`}
                         >
                             {session ? "Close" : "Save"}
                         </button>

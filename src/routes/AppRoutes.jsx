@@ -32,7 +32,7 @@ function AppRoutes() {
     return (
         <BrowserRouter>
             <Routes>
-                <Route path="/" element={<Navigate to="/login" />} />
+                <Route path="/" element={<Navigate to="/pos" />} />
                 <Route path="/login" element={<Login />} />
                 <Route
                     element={

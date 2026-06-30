@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     Home,
     Moon,
@@ -20,22 +20,54 @@ import CashDeskModal from "../features/cash/Components/CashDeskModal";
 import ReportsModal from "../features/reports/Components/ReportsModal";
 import RoomsModal from "../features/tables/Components/RoomsModal";
 import TablesModal from "../features/tables/Components/TablesModal";
+import { getActiveSession } from "../features/cash/services/cashApi";
+import usePosStore from "../features/pos/stores/posStore";
 
+// Mirrors legacy's sidebar tooltip behavior: a custom instant show/hide
+// tooltip instead of the native `title` attribute. Native title tooltips have
+// OS/browser-controlled appear/disappear timing (slow, inconsistent, can't be
+// tuned) — legacy explicitly strips `title` and builds its own body-level
+// tooltip shown on mouseenter and hidden on mouseleave for this reason.
 function NavIcon({ icon: Icon, badge, onClick, title, className = "" }) {
+    const [hovered, setHovered] = useState(false);
+    const [tooltipTop, setTooltipTop] = useState(0);
+    const btnRef = useRef(null);
+
+    const handleMouseEnter = () => {
+        if (btnRef.current) {
+            const rect = btnRef.current.getBoundingClientRect();
+            setTooltipTop(rect.top + rect.height / 2);
+        }
+        setHovered(true);
+    };
+
     return (
-        <button
-            type="button"
-            onClick={onClick}
-            title={title}
-            className={`relative w-full h-11 flex items-center justify-center text-white/80 hover:text-white hover:bg-white/10 ${className}`}
-        >
-            <Icon size={19} />
-            {badge != null && (
-                <span className="absolute top-1 right-3 min-w-[15px] h-[15px] px-1 rounded-full text-[9px] leading-[15px] text-white text-center bg-red-500">
-                    {badge}
-                </span>
+        <>
+            <button
+                ref={btnRef}
+                type="button"
+                onClick={onClick}
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={() => setHovered(false)}
+                aria-label={title}
+                className={`relative w-full h-11 flex items-center justify-center text-white/80 hover:text-white hover:bg-white/10 ${className}`}
+            >
+                <Icon size={19} />
+                {badge != null && (
+                    <span className="absolute top-1 right-3 min-w-[15px] h-[15px] px-1 rounded-full text-[9px] leading-[15px] text-white text-center bg-red-500">
+                        {badge}
+                    </span>
+                )}
+            </button>
+            {hovered && title && (
+                <div
+                    className="fixed z-[100] left-14 ml-2 -translate-y-1/2 px-2.5 py-1.5 rounded-md bg-gray-900 text-white text-xs whitespace-nowrap shadow-lg pointer-events-none"
+                    style={{ top: tooltipTop }}
+                >
+                    {title}
+                </div>
             )}
-        </button>
+        </>
     );
 }
 
@@ -50,6 +82,30 @@ function PosSidebar({ onLogout }) {
     const [reportsOpen, setReportsOpen] = useState(false);
     const [roomsOpen, setRoomsOpen] = useState(false);
     const [tablesOpen, setTablesOpen] = useState(false);
+    const setCashSessionOpen = usePosStore((state) => state.setCashSessionOpen);
+
+    // Mirrors legacy takeposnew's pos-cash-manager.js: on entering the POS,
+    // check for an active cash session, lock down POS operations if none
+    // exists (see cashSessionOpen in posStore), and auto-prompt to open one
+    // (after a short delay) instead of waiting for a manual click.
+    useEffect(() => {
+        let cancelled = false;
+        getActiveSession(terminalNumber).then((res) => {
+            if (cancelled) return;
+            if (res.success) {
+                setCashSessionOpen(!!res.session);
+                if (!res.session) {
+                    setTimeout(() => {
+                        if (!cancelled) setCashDeskOpen(true);
+                    }, 1000);
+                }
+            }
+        });
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     return (
         <aside className="w-14 bg-[var(--text-navy)] h-full overflow-y-auto shrink-0 flex flex-col">
@@ -68,7 +124,7 @@ function PosSidebar({ onLogout }) {
                 <NavIcon icon={Power} title="Logout" onClick={onLogout} />
             </div>
 
-            <CashDeskModal open={cashDeskOpen} onClose={() => setCashDeskOpen(false)} />
+            <CashDeskModal open={cashDeskOpen} onClose={() => setCashDeskOpen(false)} onLogout={onLogout} />
             <ReportsModal open={reportsOpen} onClose={() => setReportsOpen(false)} />
             <RoomsModal open={roomsOpen} onClose={() => setRoomsOpen(false)} />
             <TablesModal open={tablesOpen} onClose={() => setTablesOpen(false)} />

@@ -21,6 +21,20 @@ const usePosStore = create(
             cart: [],
             toast: null,
 
+            // False until the persisted cartsByPlace/activePlace have been
+            // read back from localStorage (onRehydrateStorage below runs
+            // asynchronously, after the first render) — so screens relying
+            // on `cart` don't act on a momentarily empty default before the
+            // real cart loads.
+            hasHydrated: false,
+
+            // Mirrors legacy's disablePOSOperations()/enablePOSOperations(): true
+            // while a cash session is open or not yet checked (optimistic default
+            // so the screen doesn't flash locked before the check resolves), false
+            // once confirmed no session exists for this terminal/day.
+            cashSessionOpen: true,
+            setCashSessionOpen: (open) => set({ cashSessionOpen: open }),
+
             setSearchTerm: (searchTerm) => set({ searchTerm }),
 
             showToast: (message) => {
@@ -91,6 +105,18 @@ const usePosStore = create(
                 set({ activePlace: place, cart: get().cartsByPlace[place] || [] });
             },
 
+            // Re-stamps the main sale's (place '0') displayed start time to now.
+            // The `sales` array is persisted across page loads, so without this
+            // the badge would keep showing whatever time it was first created —
+            // possibly from a previous day — instead of the current login.
+            stampLoginTime: () => {
+                set({
+                    sales: get().sales.map((sale) =>
+                        sale.place === "0" ? { ...sale, time: getCurrentTime() } : sale
+                    ),
+                });
+            },
+
             // Discards a parallel sale. Legacy only protects place '0' (the main
             // sale) from deletion — any other sale can always be closed.
             deleteSale: (place) => {
@@ -126,7 +152,10 @@ const usePosStore = create(
                 cartsByPlace: state.cartsByPlace,
             }),
             onRehydrateStorage: () => (state) => {
-                if (state) state.cart = state.cartsByPlace[state.activePlace] || [];
+                if (state) {
+                    state.cart = state.cartsByPlace[state.activePlace] || [];
+                    state.hasHydrated = true;
+                }
             },
         }
     )

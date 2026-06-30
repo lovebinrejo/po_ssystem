@@ -2,28 +2,31 @@ import { useState } from "react";
 import { ShoppingCart, Plus, Minus, Trash2, CreditCard } from "lucide-react";
 import CustomerSelector from "../../customers/Components/CustomerSelector";
 import OrderTypeBar from "../../tables/Components/OrderTypeBar";
-import PaymentModal from "../../payment/Components/PaymentModal";
 import EditCartItemModal from "./EditCartItemModal";
+import PaymentModal from "../../payment/PaymentModal";
 import useAuthStore from "../../authentication/stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
 
 // Product prices from the legacy API are tax-inclusive (price_ttc) and don't
 // carry a per-product tax rate yet, so the Subtotal/Tax split below is a flat
-// placeholder estimate until that data is available from the backend.
+// placeholder estimate until that data is available from the backend. Kept
+// in sync with the same constant in payment/services/paymentService.js,
+// which builds the actual payment line items in the payment modal.
 const TAX_RATE = 0.16;
 
-function CartPanel({ cart, onChangeQty, onRemove, total }) {
-    const terminalNumber = useAuthStore((state) => state.terminalConfig?.terminalNumber) || 1;
+function CartPanel({ cart, onChangeQty, onRemove, total, cashSessionOpen = true }) {
+    const terminalConfig = useAuthStore((state) => state.terminalConfig);
+    const terminalNumber = terminalConfig?.terminalNumber || 1;
     const updateCartItem = usePosStore((state) => state.updateCartItem);
-    const [paymentOpen, setPaymentOpen] = useState(false);
     const [editingItem, setEditingItem] = useState(null);
+    const [paymentOpen, setPaymentOpen] = useState(false);
     const itemCount = cart.reduce((sum, item) => sum + item.qty, 0);
     const subtotalExcl = total / (1 + TAX_RATE);
     const tax = total - subtotalExcl;
 
     return (
         <div className="w-32 sm:w-44 md:w-64 lg:w-80 shrink-0 h-full flex flex-col bg-white dark:bg-slate-900 border border-gray-200 dark:border-transparent rounded-xl p-1.5 sm:p-3 lg:p-4 text-gray-900 dark:text-white overflow-hidden">
-            <div className="shrink-0">
+            <div className={`shrink-0 ${!cashSessionOpen ? "opacity-50 pointer-events-none" : ""}`}>
                 <CustomerSelector />
                 <OrderTypeBar />
             </div>
@@ -94,7 +97,7 @@ function CartPanel({ cart, onChangeQty, onRemove, total }) {
 
             <button
                 type="button"
-                disabled={cart.length === 0}
+                disabled={cart.length === 0 || !cashSessionOpen}
                 onClick={() => setPaymentOpen(true)}
                 className="shrink-0 mt-2 sm:mt-4 w-full flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg py-2 sm:py-3 text-[11px] sm:text-sm font-semibold border border-transparent text-white bg-gradient-to-r from-green-500 to-emerald-400 shadow-md shadow-green-500/30 transition-all hover:from-green-400 hover:to-emerald-300 hover:shadow-lg hover:shadow-green-500/40 active:scale-[0.98] disabled:bg-gradient-to-r disabled:from-gray-100 disabled:to-gray-100 disabled:border-gray-300 disabled:text-gray-400 disabled:shadow-none disabled:cursor-not-allowed dark:disabled:from-slate-800 dark:disabled:to-slate-800 dark:disabled:border-slate-600 dark:disabled:text-slate-500"
             >
@@ -103,22 +106,14 @@ function CartPanel({ cart, onChangeQty, onRemove, total }) {
                 <span className="sm:hidden">Pay</span>
             </button>
 
-            <PaymentModal
-                open={paymentOpen}
-                onClose={() => setPaymentOpen(false)}
-                onComplete={() => setPaymentOpen(false)}
-                itemCount={itemCount}
-                subtotalExcl={subtotalExcl}
-                tax={tax}
-                total={total}
-            />
-
             <EditCartItemModal
                 item={editingItem}
                 onClose={() => setEditingItem(null)}
                 onSave={updateCartItem}
                 onRemove={onRemove}
             />
+
+            <PaymentModal open={paymentOpen} onClose={() => setPaymentOpen(false)} />
         </div>
     );
 }

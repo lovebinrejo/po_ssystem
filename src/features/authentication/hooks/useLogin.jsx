@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { loginUser } from "../services/authService";
 import useAuthStore from "../stores/authStore";
+import usePosStore from "../../pos/stores/posStore";
 
 export const useLogin = () => {
     const [loading, setLoading] = useState(false);
@@ -8,6 +9,7 @@ export const useLogin = () => {
     const setUser = useAuthStore((state) => state.setUser);
     const setToken = useAuthStore((state) => state.setToken);
     const setTerminalConfig = useAuthStore((state) => state.setTerminalConfig);
+    const stampLoginTime = usePosStore((state) => state.stampLoginTime);
 
     const login = async (email, password, masterEntity) => {
         try {
@@ -18,6 +20,7 @@ export const useLogin = () => {
             setUser(result.user);
             setToken(result.token);
             setTerminalConfig(result.terminalConfig);
+            stampLoginTime();
 
             return result;
         } catch (err) {
