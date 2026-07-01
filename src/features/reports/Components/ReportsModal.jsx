@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import {
     BarChart3,
     X,
@@ -14,6 +14,9 @@ import {
     Printer,
     ChevronLeft,
     ChevronRight,
+    ChevronUp,
+    ChevronDown,
+    ChevronsUpDown,
     FileSpreadsheet,
     FileDown,
     Loader2,
@@ -39,6 +42,26 @@ const ACCENTS = {
 
 const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
 const toIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+// entry.date is a display string ("MM/DD/YYYY"), not a raw sortable value —
+// parse it the same way the rest of this app formats dates so "Date" sorts
+// chronologically instead of alphabetically.
+const parseDisplayDate = (str) => {
+    const [m, d, y] = str.split("/").map(Number);
+    return new Date(y, m - 1, d).getTime();
+};
+
+const compareEntries = (a, b, field, dir) => {
+    let result;
+    if (field === "date") {
+        result = parseDisplayDate(a.date) - parseDisplayDate(b.date);
+    } else if (typeof a[field] === "number") {
+        result = a[field] - b[field];
+    } else {
+        result = String(a[field] ?? "").localeCompare(String(b[field] ?? ""));
+    }
+    return dir === "asc" ? result : -result;
+};
 
 const reportsQueryKey = (terminal, filters) => [
     "reports",
@@ -74,6 +97,9 @@ function ReportsModal({ open, onClose }) {
     const [tableSearch, setTableSearch] = useState("");
     const [pageSize, setPageSize] = useState(25); // number of rows, or "All"
     const [page, setPage] = useState(1);
+    // Mirrors legacy's DataTables default (order: [[0, 'desc']] — Date, newest first).
+    const [sortField, setSortField] = useState("date");
+    const [sortDir, setSortDir] = useState("desc");
     const [printingId, setPrintingId] = useState(null);
     const [exportingExcel, setExportingExcel] = useState(false);
     const [printError, setPrintError] = useState("");
@@ -81,10 +107,15 @@ function ReportsModal({ open, onClose }) {
     // Submitted filters drive the query key, so reopening with the same filters serves cached data instantly.
     const [filters, setFilters] = useState({ start: today(), end: today(), search: "" });
 
-    const { data, isLoading, error: queryError } = useQuery({
+    const { data, isLoading, isFetching, error: queryError } = useQuery({
         queryKey: reportsQueryKey(terminalNumber, filters),
         queryFn: () => fetchReports(terminalNumber, filters),
         enabled: open,
+        // Applying a new date range/search builds a brand-new query key with no
+        // cached data yet, so without this the full skeleton would re-flash on
+        // every "Apply Filter" click instead of just updating the numbers in
+        // place — keeps showing the previous result while the new one loads.
+        placeholderData: keepPreviousData,
     });
 
     const payments = data?.payments ?? [];
@@ -104,13 +135,25 @@ function ReportsModal({ open, onClose }) {
         setPage(1);
     };
 
-    const filteredEntries = entries.filter((e) => {
-        if (!tableSearch) return true;
-        const term = tableSearch.toLowerCase();
-        return [e.ref, e.customer, e.payment_type, e.author, e.status].some((field) =>
-            field?.toLowerCase().includes(term)
-        );
-    });
+    const handleSort = (field) => {
+        if (field === sortField) {
+            setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+        } else {
+            setSortField(field);
+            setSortDir("asc");
+        }
+        setPage(1);
+    };
+
+    const filteredEntries = entries
+        .filter((e) => {
+            if (!tableSearch) return true;
+            const term = tableSearch.toLowerCase();
+            return [e.ref, e.customer, e.payment_type, e.author, e.status].some((field) =>
+                field?.toLowerCase().includes(term)
+            );
+        })
+        .sort((a, b) => compareEntries(a, b, sortField, sortDir));
 
     const totalPages = pageSize === "All" ? 1 : Math.max(1, Math.ceil(filteredEntries.length / pageSize));
     const safePage = Math.min(page, totalPages);
@@ -233,10 +276,11 @@ function ReportsModal({ open, onClose }) {
                         <button
                             type="button"
                             onClick={handleApplyFilter}
-                            className="flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700"
+                            disabled={isFetching}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-70 disabled:cursor-wait"
                         >
-                            <Filter size={14} />
-                            Apply Filter
+                            {isFetching ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
+                            {isFetching ? "Applying..." : "Apply Filter"}
                         </button>
                     </div>
 
@@ -251,7 +295,7 @@ function ReportsModal({ open, onClose }) {
                     {showSkeleton ? (
                         <ReportsSkeleton />
                     ) : (
-                        <>
+                        <div className={`flex-1 min-h-0 flex flex-col gap-3 transition-opacity ${isFetching ? "opacity-50" : ""}`}>
                             {/* Payment summary cards */}
                             <div className="shrink-0">
                                 <h3 className="flex items-center gap-1.5 text-sm font-semibold mb-1.5">
@@ -357,29 +401,30 @@ function ReportsModal({ open, onClose }) {
                                     />
                                 </div>
 
-                                <div className="flex-1 min-h-[320px] overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700 overflow-y-auto soft-scrollbar">
+                                <div className="max-h-[45vh] overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700 overflow-y-auto soft-scrollbar">
                                     <table className="w-full text-xs">
                                         <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 uppercase">
                                             <tr>
-                                                <th className="text-left px-3 py-2">Date</th>
-                                                <th className="text-left px-3 py-2">Invoice No</th>
-                                                <th className="text-left px-3 py-2">Third Party</th>
-                                                <th className="text-left px-3 py-2">Payment Type</th>
-                                                <th className="text-right px-3 py-2">Amt (Excl)</th>
-                                                <th className="text-right px-3 py-2">VAT</th>
-                                                <th className="text-right px-3 py-2">Amt (Incl)</th>
-                                                <th className="text-right px-3 py-2">Pending</th>
-                                                <th className="text-right px-3 py-2">Change</th>
-                                                <th className="text-right px-3 py-2">Received</th>
-                                                <th className="text-left px-3 py-2">Author</th>
-                                                <th className="text-left px-3 py-2">Status</th>
-                                                <th className="text-center px-3 py-2">Actions</th>
+                                                <SortableHeader label="Date" field="date" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                                                <SortableHeader label="Invoice No" field="ref" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                                                <SortableHeader label="Third Party" field="customer" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                                                <SortableHeader label="Payment Type" field="payment_type" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                                                <SortableHeader label="Amount (Excl. Tax)" field="total_ht" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                                                <SortableHeader label="VAT" field="total_tva" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                                                <SortableHeader label="Amount (Inc. Tax)" field="total_ttc" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                                                <SortableHeader label="Pending" field="pending" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                                                <SortableHeader label="Change" field="change" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                                                <SortableHeader label="Received" field="received" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                                                <SortableHeader label="Author" field="author" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                                                <SortableHeader label="Currency" field="currency" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                                                <SortableHeader label="Status" field="status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                                                <th className="text-center px-0.5 py-1 text-xs whitespace-nowrap">Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {visibleEntries.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan={13} className="text-center py-6 text-gray-400 dark:text-slate-500">
+                                                    <td colSpan={14} className="text-center py-6 text-gray-400 dark:text-slate-500">
                                                         No entries found
                                                     </td>
                                                 </tr>
@@ -389,34 +434,35 @@ function ReportsModal({ open, onClose }) {
                                                         key={entry.id}
                                                         className="border-t border-gray-100 dark:border-slate-800 hover:bg-blue-50 dark:hover:bg-slate-800/60"
                                                     >
-                                                        <td className="px-3 py-2">{entry.date}</td>
-                                                        <td className="px-3 py-2 font-semibold">{entry.ref}</td>
-                                                        <td className="px-3 py-2">{entry.customer}</td>
-                                                        <td className="px-3 py-2">{entry.payment_type}</td>
-                                                        <td className="px-3 py-2 text-right">{entry.total_ht.toFixed(2)}</td>
-                                                        <td className="px-3 py-2 text-right">{entry.total_tva.toFixed(2)}</td>
-                                                        <td className="px-3 py-2 text-right font-semibold">{entry.total_ttc.toFixed(2)}</td>
-                                                        <td className={`px-3 py-2 text-right ${entry.pending > 0 ? "text-amber-500 font-semibold" : ""}`}>
+                                                        <td className="px-0.5 py-1 whitespace-nowrap">{entry.date}</td>
+                                                        <td className="px-0.5 py-1 font-semibold whitespace-nowrap">{entry.ref}</td>
+                                                        <td className="px-0.5 py-1 max-w-[90px] truncate">{entry.customer}</td>
+                                                        <td className="px-0.5 py-1 max-w-[85px] truncate">{entry.payment_type}</td>
+                                                        <td className="px-0.5 py-1 text-right">{entry.total_ht.toFixed(2)}</td>
+                                                        <td className="px-0.5 py-1 text-right">{entry.total_tva.toFixed(2)}</td>
+                                                        <td className="px-0.5 py-1 text-right font-semibold">{entry.total_ttc.toFixed(2)}</td>
+                                                        <td className={`px-0.5 py-1 text-right ${entry.pending > 0 ? "text-amber-500 font-semibold" : ""}`}>
                                                             {entry.pending.toFixed(2)}
                                                         </td>
-                                                        <td className={`px-3 py-2 text-right ${entry.change > 0 ? "text-emerald-600 font-semibold" : ""}`}>
+                                                        <td className={`px-0.5 py-1 text-right ${entry.change > 0 ? "text-emerald-600 font-semibold" : ""}`}>
                                                             {entry.change.toFixed(2)}
                                                         </td>
-                                                        <td className="px-3 py-2 text-right">{entry.received.toFixed(2)}</td>
-                                                        <td className="px-3 py-2">{entry.author}</td>
-                                                        <td className="px-3 py-2">{entry.status}</td>
-                                                        <td className="px-3 py-2 text-center">
+                                                        <td className="px-0.5 py-1 text-right">{entry.received.toFixed(2)}</td>
+                                                        <td className="px-0.5 py-1 whitespace-nowrap">{entry.author}</td>
+                                                        <td className="px-0.5 py-1 whitespace-nowrap">{entry.currency}</td>
+                                                        <td className="px-0.5 py-1 max-w-[85px]">{entry.status}</td>
+                                                        <td className="px-0.5 py-1 text-center">
                                                             <button
                                                                 type="button"
                                                                 title="Print Invoice"
                                                                 disabled={printingId === entry.id}
                                                                 onClick={() => handlePrintInvoice(entry)}
-                                                                className="p-1.5 rounded-md border border-gray-200 dark:border-slate-600 text-gray-500 dark:text-slate-300 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600 dark:hover:bg-blue-500/10 dark:hover:border-blue-500 dark:hover:text-blue-400 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-wait"
+                                                                className="p-1 rounded-md border border-gray-200 dark:border-slate-600 text-gray-500 dark:text-slate-300 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600 dark:hover:bg-blue-500/10 dark:hover:border-blue-500 dark:hover:text-blue-400 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-wait"
                                                             >
                                                                 {printingId === entry.id ? (
-                                                                    <Loader2 size={13} className="animate-spin" />
+                                                                    <Loader2 size={12} className="animate-spin" />
                                                                 ) : (
-                                                                    <Printer size={13} />
+                                                                    <Printer size={12} />
                                                                 )}
                                                             </button>
                                                         </td>
@@ -427,16 +473,16 @@ function ReportsModal({ open, onClose }) {
                                         {totals && filteredEntries.length > 0 && (
                                             <tfoot className="sticky bottom-0 z-10 bg-gray-50 dark:bg-slate-800 font-semibold shadow-[0_-1px_0_0_rgba(0,0,0,0.1)]">
                                                 <tr>
-                                                    <td colSpan={4} className="text-right px-3 py-2">
+                                                    <td colSpan={4} className="text-right px-0.5 py-1">
                                                         Total
                                                     </td>
-                                                    <td className="text-right px-3 py-2">{displayTotals.total_ht.toFixed(2)}</td>
-                                                    <td className="text-right px-3 py-2">{displayTotals.total_tva.toFixed(2)}</td>
-                                                    <td className="text-right px-3 py-2">{displayTotals.total_ttc.toFixed(2)}</td>
-                                                    <td className="text-right px-3 py-2">{displayTotals.pending.toFixed(2)}</td>
-                                                    <td className="text-right px-3 py-2 text-emerald-600">{displayTotals.change.toFixed(2)}</td>
-                                                    <td className="text-right px-3 py-2">{displayTotals.received.toFixed(2)}</td>
-                                                    <td colSpan={3}></td>
+                                                    <td className="text-right px-0.5 py-1">{displayTotals.total_ht.toFixed(2)}</td>
+                                                    <td className="text-right px-0.5 py-1">{displayTotals.total_tva.toFixed(2)}</td>
+                                                    <td className="text-right px-0.5 py-1">{displayTotals.total_ttc.toFixed(2)}</td>
+                                                    <td className="text-right px-0.5 py-1">{displayTotals.pending.toFixed(2)}</td>
+                                                    <td className="text-right px-0.5 py-1 text-emerald-600">{displayTotals.change.toFixed(2)}</td>
+                                                    <td className="text-right px-0.5 py-1">{displayTotals.received.toFixed(2)}</td>
+                                                    <td colSpan={4}></td>
                                                 </tr>
                                             </tfoot>
                                         )}
@@ -481,7 +527,7 @@ function ReportsModal({ open, onClose }) {
                                     )}
                                 </div>
                             </div>
-                        </>
+                        </div>
                     )}
                 </div>
 
@@ -516,6 +562,29 @@ function ReportsModal({ open, onClose }) {
                 </div>
             </div>
         </div>
+    );
+}
+
+// Mirrors legacy's DataTables sortable column headers (every column sortable,
+// default Date desc) — click to sort ascending, click again to reverse.
+function SortableHeader({ label, field, sortField, sortDir, onSort, align = "left" }) {
+    const isActive = sortField === field;
+    return (
+        <th
+            onClick={() => onSort(field)}
+            className={`px-0.5 py-1.5 text-xs whitespace-nowrap cursor-pointer select-none hover:text-gray-700 dark:hover:text-slate-200 ${
+                align === "right" ? "text-right" : "text-left"
+            }`}
+        >
+            <span className={`inline-flex items-center gap-0.5 ${align === "right" ? "flex-row-reverse" : ""}`}>
+                {label}
+                {isActive ? (
+                    sortDir === "asc" ? <ChevronUp size={11} /> : <ChevronDown size={11} />
+                ) : (
+                    <ChevronsUpDown size={11} className="opacity-30" />
+                )}
+            </span>
+        </th>
     );
 }
 

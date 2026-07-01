@@ -138,8 +138,14 @@ function CashDeskModal({ open, onClose, onLogout }) {
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto soft-scrollbar rounded-xl bg-white dark:bg-slate-900 text-gray-900 dark:text-white shadow-2xl">
-                <div className="flex items-center justify-between px-5 py-2.5 bg-[#2c6291] rounded-t-xl text-white">
-                    <div className="flex items-center gap-2 text-base font-semibold uppercase tracking-wide">
+                <div
+                    className={`flex items-center justify-between px-5 py-2.5 rounded-t-xl ${
+                        session
+                            ? "bg-[#2c6291] text-white uppercase tracking-wide"
+                            : "bg-gray-50 dark:bg-slate-800 text-[var(--text-navy)] dark:text-white border-b border-gray-200 dark:border-slate-700"
+                    }`}
+                >
+                    <div className="flex items-center gap-2 text-base font-semibold">
                         <Landmark size={18} />
                         {session ? "POS Cash Desk Control" : "POS Cash Desk Control - New"}
                     </div>
@@ -257,7 +263,7 @@ function CashDeskModal({ open, onClose, onLogout }) {
                                     <input
                                         disabled
                                         value={`Terminal ${terminalNumber}`}
-                                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-gray-50 dark:bg-slate-800 text-gray-400 dark:text-slate-500"
+                                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                                     />
                                 </div>
                                 <div>
@@ -265,7 +271,7 @@ function CashDeskModal({ open, onClose, onLogout }) {
                                     <input
                                         readOnly
                                         value={new Date().toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })}
-                                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-[var(--text-navy)] text-white"
+                                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                                     />
                                 </div>
                             </div>
@@ -280,7 +286,7 @@ function CashDeskModal({ open, onClose, onLogout }) {
 
                                 <div className="grid grid-cols-3 items-center gap-2 mb-2">
                                     <span className="text-sm text-gray-600 dark:text-slate-300">Theorical Amount</span>
-                                    <div className="col-span-2 rounded-lg bg-[var(--text-navy)] text-white text-right px-3 py-2 text-sm">
+                                    <div className="col-span-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-gray-50 dark:bg-slate-800 text-gray-900 dark:text-white text-right px-3 py-2 text-sm">
                                         {(data?.theoreticalAmount ?? 0).toFixed(2)}
                                     </div>
                                 </div>
@@ -292,7 +298,7 @@ function CashDeskModal({ open, onClose, onLogout }) {
                                         placeholder="0.00"
                                         value={openingAmount}
                                         onChange={(e) => setOpeningAmount(e.target.value)}
-                                        className="col-span-2 rounded-lg bg-[var(--text-navy)] text-white text-right px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400 placeholder:text-white/50"
+                                        className="col-span-2 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white text-right px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400"
                                     />
                                 </div>
                             </div>

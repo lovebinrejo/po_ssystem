@@ -28,6 +28,15 @@
   }
 }
 
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
 :root {
   --theme-color: #397db9;
   --theme-color-dark: #2c6291;

@@ -1,8 +1,7 @@
 import { create } from "zustand";
-import { DEFAULT_CUSTOMER } from "../services/customerApi";
 
 const useCustomerStore = create((set) => ({
-    selectedCustomer: DEFAULT_CUSTOMER,
+    selectedCustomer: null,
     setSelectedCustomer: (customer) => set({ selectedCustomer: customer }),
 }));
 

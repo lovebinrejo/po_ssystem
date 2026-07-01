@@ -1,30 +1,38 @@
 import { useEffect, useState } from "react";
-import useAuthStore from "../../authentication/stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
-import { fetchReceipt } from "../../reports/services/receiptApi";
+import useCustomerStore from "../../customers/stores/customerStore";
 import { TAX_RATE, buildPaymentLines, submitPayment } from "../services/paymentService";
+import { openLencoWidget } from "../services/lencoService";
+import { usePaymentBase } from "./usePaymentBase";
 
 // Orchestrates the single-payment-method flow (everything except Split
 // Payment, which has its own hook for the sequential multi-call settlement).
 export function usePayment() {
-    const cart = usePosStore((state) => state.cart);
     const hasHydrated = usePosStore((state) => state.hasHydrated);
-    const activePlace = usePosStore((state) => state.activePlace);
-    const clearCart = usePosStore((state) => state.clearCart);
-    const showToast = usePosStore((state) => state.showToast);
-    const terminalConfig = useAuthStore((state) => state.terminalConfig);
-    const terminalNumber = terminalConfig?.terminalNumber || 1;
+    const selectedCustomer = useCustomerStore((state) => state.selectedCustomer);
+    const {
+        cart,
+        activePlace,
+        terminalNumber,
+        socid,
+        total,
+        submitting,
+        setSubmitting,
+        error,
+        setError,
+        completedReceipt,
+        finalizePayment,
+        handleError,
+        resetPaymentState,
+        showToast,
+    } = usePaymentBase();
 
     const itemCount = cart.reduce((sum, item) => sum + item.qty, 0);
-    const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
     const subtotalExcl = total / (1 + TAX_RATE);
     const tax = total - subtotalExcl;
 
     const [selectedMethod, setSelectedMethod] = useState("01");
     const [amountTendered, setAmountTendered] = useState(total.toFixed(2));
-    const [submitting, setSubmitting] = useState(false);
-    const [error, setError] = useState("");
-    const [completedReceipt, setCompletedReceipt] = useState(null);
 
     // Keep the tendered amount defaulted to the live total while the cart can
     // still change (mirrors legacy's openPaymentModal() re-seeding amount on
@@ -35,30 +43,67 @@ export function usePayment() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [total]);
 
-    const completePayment = async () => {
+    const settlePayment = async (methodCode, amount) => {
         setSubmitting(true);
         setError("");
         try {
             const res = await submitPayment({
-                socid: terminalConfig?.defaultCustomerId,
+                socid,
                 lines: buildPaymentLines(cart),
-                payment_method_code: selectedMethod,
-                payment_amount: parseFloat(amountTendered) || 0,
+                payment_method_code: methodCode,
+                payment_amount: amount,
                 terminal: terminalNumber,
                 place: parseInt(activePlace, 10) || 0,
             });
 
             if (!res.success) throw new Error(res.error || "Payment failed");
 
-            clearCart();
-            showToast(`Payment successful — Invoice ${res.invoice_ref}`);
-
-            const receipt = await fetchReceipt(res.invoice_id).catch(() => null);
-            setCompletedReceipt(receipt || { invoice_id: res.invoice_id, invoice_ref: res.invoice_ref });
+            await finalizePayment(res.invoice_id, res.invoice_ref);
         } catch (err) {
-            setError(err.response?.data?.error || err.message || "Payment failed");
+            handleError(err);
         } finally {
             setSubmitting(false);
+        }
+    };
+
+    const completePayment = () => settlePayment(selectedMethod, parseFloat(amountTendered) || 0);
+
+    // Called when the modal is dismissed after a completed sale, so the next
+    // "Proceed to Payment" starts clean instead of re-showing this receipt.
+    const resetForNewSale = () => {
+        resetPaymentState();
+        setSelectedMethod("01");
+        setAmountTendered(total.toFixed(2));
+    };
+
+    // Mirrors legacy's openLencoPayWidget(): opens the LencoPay hosted widget
+    // (public key, client-side only) and, once the cashier actually pays,
+    // settles the sale through the exact same api/pos/payment call every
+    // other method uses — Lenco only replaces the "collect the money" step.
+    const payViaLenco = async () => {
+        setError("");
+        const amount = parseFloat(amountTendered) || 0;
+        if (amount <= 0) {
+            setError("Enter a valid payment amount.");
+            return;
+        }
+
+        const nameParts = (selectedCustomer?.name || "Customer").trim().split(" ");
+
+        try {
+            await openLencoWidget({
+                amount,
+                currency: "ZMW",
+                email: selectedCustomer?.email || "customer@pos.local",
+                phone: selectedCustomer?.phone || "",
+                firstName: nameParts[0] || "Customer",
+                lastName: nameParts.slice(1).join(" "),
+                reference: `pos-${terminalNumber}-${Date.now()}`,
+                onSuccess: () => settlePayment("06", amount),
+                onClose: () => showToast("Payment was cancelled"),
+            });
+        } catch (err) {
+            setError(err.message || "Unable to open LencoPay");
         }
     };
 
@@ -77,5 +122,7 @@ export function usePayment() {
         error,
         completedReceipt,
         completePayment,
+        payViaLenco,
+        resetForNewSale,
     };
 }

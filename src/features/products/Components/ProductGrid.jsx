@@ -24,7 +24,7 @@ function ProductTile({ product, onAddToCart, onDecrement }) {
 
     return (
         <div
-            onDoubleClick={() => !isOutOfStock && onAddToCart(product)}
+            onClick={() => !isOutOfStock && onAddToCart(product)}
             className="rounded-xl sm:rounded-2xl overflow-hidden bg-white dark:bg-[#1e293b] shadow hover:-translate-y-0.5 transition-transform cursor-pointer">
             <div className="relative">
                 {showImage ? (
@@ -66,7 +66,10 @@ function ProductTile({ product, onAddToCart, onDecrement }) {
                 <button
                     type="button"
                     disabled={isOutOfStock}
-                    onClick={() => onDecrement(product.id)}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onDecrement(product.id);
+                    }}
                     aria-label="Decrease quantity"
                     className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center rounded-full bg-gray-200 dark:bg-slate-600 text-gray-700 dark:text-slate-100 shadow-sm cursor-pointer transition-all hover:bg-gray-300 dark:hover:bg-slate-500 active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gray-200 dark:disabled:hover:bg-slate-600"
                 >
@@ -76,7 +79,10 @@ function ProductTile({ product, onAddToCart, onDecrement }) {
                 <button
                     type="button"
                     disabled={isOutOfStock}
-                    onClick={() => onAddToCart(product)}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onAddToCart(product);
+                    }}
                     aria-label="Add to cart"
                     className="w-7 h-7 sm:w-9 sm:h-9 flex items-center justify-center rounded-full text-white bg-emerald-500 shadow-sm shadow-emerald-500/30 cursor-pointer transition-all hover:bg-emerald-600 hover:shadow-md hover:shadow-emerald-500/40 active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:bg-gray-300 dark:disabled:bg-gray-600"
                 >

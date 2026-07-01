@@ -101,7 +101,7 @@ function BarcodeScannerModal({ open, onClose, onScan }) {
                     <p className="text-center text-sm text-gray-600 mt-3">{status}</p>
 
                     <form onSubmit={handleManualSubmit} className="mt-4 pt-4 border-t border-dashed border-gray-300">
-                        <p className="text-sm text-gray-600 mb-2">Or enter barcode manually:</p>
+                        <p className="text-sm text-gray-600 mb-2">Enter Barcode Manually:</p>
                         <div className="flex gap-2">
                             <input
                                 type="text"

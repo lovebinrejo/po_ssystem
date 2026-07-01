@@ -1,8 +1,6 @@
 import { useState } from "react";
-import useAuthStore from "../../authentication/stores/authStore";
-import usePosStore from "../../pos/stores/posStore";
-import { fetchReceipt } from "../../reports/services/receiptApi";
 import { buildPaymentLines, submitPayment } from "../services/paymentService";
+import { usePaymentBase } from "./usePaymentBase";
 
 let nextLineId = 1;
 const newLine = (amount = "") => ({ id: nextLineId++, method: "01", amount });
@@ -14,19 +12,22 @@ const newLine = (amount = "") => ({ id: nextLineId++, method: "01", amount });
 //   1st line: no existing_invoice_id  -> creates the invoice + records payment 1
 //   2nd..nth line: existing_invoice_id -> adds payment N to that same invoice
 export function useSplitPayment() {
-    const cart = usePosStore((state) => state.cart);
-    const activePlace = usePosStore((state) => state.activePlace);
-    const clearCart = usePosStore((state) => state.clearCart);
-    const showToast = usePosStore((state) => state.showToast);
-    const terminalConfig = useAuthStore((state) => state.terminalConfig);
-    const terminalNumber = terminalConfig?.terminalNumber || 1;
-
-    const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+    const {
+        cart,
+        activePlace,
+        terminalNumber,
+        socid,
+        total,
+        submitting,
+        setSubmitting,
+        error,
+        setError,
+        completedReceipt,
+        finalizePayment,
+        handleError,
+    } = usePaymentBase();
 
     const [lines, setLines] = useState(() => [newLine(), newLine()]);
-    const [submitting, setSubmitting] = useState(false);
-    const [error, setError] = useState("");
-    const [completedReceipt, setCompletedReceipt] = useState(null);
 
     const linesTotal = lines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0);
     const remaining = total - linesTotal;
@@ -54,7 +55,7 @@ export function useSplitPayment() {
                 if (amount <= 0) continue;
 
                 const res = await submitPayment({
-                    socid: terminalConfig?.defaultCustomerId,
+                    socid,
                     // Only the first call needs the cart lines — once the invoice
                     // exists, subsequent calls just add a payment to it.
                     lines: invoiceId ? [] : baseLines,
@@ -72,13 +73,9 @@ export function useSplitPayment() {
 
             if (!invoiceId) throw new Error("Enter at least one payment amount.");
 
-            clearCart();
-            showToast(`Payment successful — Invoice ${invoiceRef}`);
-
-            const receipt = await fetchReceipt(invoiceId).catch(() => null);
-            setCompletedReceipt(receipt || { invoice_id: invoiceId, invoice_ref: invoiceRef });
+            await finalizePayment(invoiceId, invoiceRef);
         } catch (err) {
-            setError(err.response?.data?.error || err.message || "Payment failed");
+            handleError(err);
         } finally {
             setSubmitting(false);
         }
