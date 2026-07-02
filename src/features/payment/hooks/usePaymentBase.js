@@ -11,6 +11,7 @@ export function usePaymentBase() {
     const activePlace = usePosStore((state) => state.activePlace);
     const clearCart = usePosStore((state) => state.clearCart);
     const showToast = usePosStore((state) => state.showToast);
+    const pendingInvoice = usePosStore((state) => state.pendingInvoice);
     const terminalConfig = useAuthStore((state) => state.terminalConfig);
     const terminalNumber = terminalConfig?.terminalNumber || 1;
     const selectedCustomer = useCustomerStore((state) => state.selectedCustomer);
@@ -19,7 +20,13 @@ export function usePaymentBase() {
     // configured default customer if none was explicitly selected.
     const socid = selectedCustomer?.id || terminalConfig?.defaultCustomerId;
 
-    const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+    // Settling a Reports invoice (pendingInvoice set): the amount actually due
+    // is what's left to pay on that invoice, not the cart's line total — some
+    // of it may already be paid. A fresh sale has no pendingInvoice, so total
+    // is just the cart sum as before.
+    const cartTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+    const total = pendingInvoice ? pendingInvoice.remainToPay : cartTotal;
+    const existingInvoiceId = pendingInvoice?.id || null;
 
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
@@ -51,6 +58,8 @@ export function usePaymentBase() {
         terminalNumber,
         socid,
         total,
+        pendingInvoice,
+        existingInvoiceId,
         submitting,
         setSubmitting,
         error,

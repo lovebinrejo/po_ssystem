@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import {
     BarChart3,
@@ -22,6 +22,7 @@ import {
     Loader2,
 } from "lucide-react";
 import useAuthStore from "../../authentication/stores/authStore";
+import usePosStore from "../../pos/stores/posStore";
 import { getPaymentSummary, getReportsData } from "../services/reportsApi";
 import { fetchReceipt } from "../services/receiptApi";
 import { printReceipt } from "./InvoiceReceipt";
@@ -38,6 +39,16 @@ const ACCENTS = {
     mobile: "bg-violet-600",
     cheque: "bg-amber-600",
     other: "bg-slate-600",
+};
+// Soft/tinted variant of ACCENTS for the low-emphasis "count" badge (solid ACCENTS
+// color is reserved for the higher-emphasis percent badge).
+const SOFT_ACCENTS = {
+    cash: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    credit: "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
+    bank: "bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400",
+    mobile: "bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400",
+    cheque: "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    other: "bg-slate-100 dark:bg-slate-500/10 text-slate-600 dark:text-slate-400",
 };
 
 const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
@@ -89,6 +100,9 @@ const fetchReports = async (terminal, filters) => {
 
 function ReportsModal({ open, onClose }) {
     const terminalNumber = useAuthStore((state) => state.terminalConfig?.terminalNumber) || 1;
+    const loadInvoiceIntoCart = usePosStore((state) => state.loadInvoiceIntoCart);
+    const showToast = usePosStore((state) => state.showToast);
+    const overlayRef = useRef(null);
 
     // Draft inputs for the filter bar; only become the active query when "Apply Filter" is clicked.
     const [startDate, setStartDate] = useState(today());
@@ -103,6 +117,17 @@ function ReportsModal({ open, onClose }) {
     const [printingId, setPrintingId] = useState(null);
     const [exportingExcel, setExportingExcel] = useState(false);
     const [printError, setPrintError] = useState("");
+    const [loadingInvoiceId, setLoadingInvoiceId] = useState(null);
+    const [loadError, setLoadError] = useState("");
+
+    // This modal stays mounted across opens (only `open` toggles), so without
+    // this a "nothing to settle" message from a previous visit would still be
+    // sitting there next time it's reopened. Auto-dismiss like a toast instead.
+    useEffect(() => {
+        if (!loadError) return;
+        const timer = setTimeout(() => setLoadError(""), 3500);
+        return () => clearTimeout(timer);
+    }, [loadError]);
 
     // Submitted filters drive the query key, so reopening with the same filters serves cached data instantly.
     const [filters, setFilters] = useState({ start: today(), end: today(), search: "" });
@@ -184,6 +209,35 @@ function ReportsModal({ open, onClose }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pageSize, tableSearch, filteredEntries.length]);
 
+    // Prevent the product grid behind the overlay from scrolling while this modal is open.
+    // The DashboardLayout content pane has its own explicit overflow-y-auto
+    // (independent of document.body), so a wheel/touch gesture over the backdrop
+    // still scrolls the grid underneath even though it's visually covered.
+    // React's onWheel/onTouchMove props attach passive listeners, so calling
+    // preventDefault() there is silently ignored — needs a manually-attached
+    // non-passive listener to actually block it. The entries table is excluded
+    // so it keeps scrolling normally.
+    useEffect(() => {
+        if (!open) return;
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+
+        const blockBackgroundScroll = (e) => {
+            if (!e.target.closest(".reports-entries-scroll")) {
+                e.preventDefault();
+            }
+        };
+        const node = overlayRef.current;
+        node?.addEventListener("wheel", blockBackgroundScroll, { passive: false });
+        node?.addEventListener("touchmove", blockBackgroundScroll, { passive: false });
+
+        return () => {
+            document.body.style.overflow = previousOverflow;
+            node?.removeEventListener("wheel", blockBackgroundScroll);
+            node?.removeEventListener("touchmove", blockBackgroundScroll);
+        };
+    }, [open]);
+
     if (!open) return null;
 
     const showSkeleton = isLoading && !data;
@@ -235,25 +289,69 @@ function ReportsModal({ open, onClose }) {
         }
     };
 
+    // Legacy: clicking a Reports row loads that invoice's lines back into the
+    // cart as locked items and switches the pay button to settle this invoice
+    // (via existing_invoice_id) instead of starting a new sale. Draft invoices
+    // never reach this table (the backend query excludes them); Abandoned
+    // invoices are excluded here client-side to mirror legacy's server-side gate.
+    // Invoices with nothing left to pay (entry.pending <= 0 — already fully
+    // settled, possibly even overpaid) are excluded too: legacy itself has no
+    // such guard and will happily record another payment (capped at the full
+    // invoice total, not the — already zero/negative — remaining balance),
+    // producing a spurious extra payment and a nonsense "change" amount.
+    const isSettleable = (entry) => entry.status !== "Abandoned" && entry.pending > 0;
+
+    const handleLoadInvoiceToCart = async (entry) => {
+        if (loadingInvoiceId) return;
+        if (!isSettleable(entry)) {
+            showToast(
+                entry.status === "Abandoned"
+                    ? "This invoice has been abandoned and can't be loaded into the cart."
+                    : "This invoice has no remaining balance — nothing to settle.",
+                "warning"
+            );
+            return;
+        }
+        setLoadingInvoiceId(entry.id);
+        setLoadError("");
+        try {
+            const receipt = await fetchReceipt(entry.id);
+            const items = receipt.lines.map((line) => ({
+                id: line.product_id,
+                name: line.product_label || line.description || "Item",
+                ref: line.product_ref || "",
+                price: line.qty > 0 ? line.total_ttc / line.qty : line.price_unit,
+                qty: line.qty,
+            }));
+            loadInvoiceIntoCart({ id: entry.id, ref: entry.ref, remainToPay: entry.pending, items });
+            showToast(`Invoice ${entry.ref} loaded into cart — ZMW ${entry.pending.toFixed(2)} due`);
+            onClose();
+        } catch (err) {
+            setLoadError(err.message || "Failed to load invoice into cart");
+        } finally {
+            setLoadingInvoiceId(null);
+        }
+    };
+
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-            <div className="w-full max-w-[95vw] xl:max-w-7xl max-h-[95vh] flex flex-col overflow-hidden rounded-xl bg-white dark:bg-slate-900 text-gray-900 dark:text-white shadow-2xl">
-                <div className="shrink-0 flex items-center justify-between px-5 py-2.5 bg-[#2c6291] rounded-t-xl text-white">
-                    <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center">
-                            <BarChart3 size={18} />
+        <div ref={overlayRef} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2">
+            <div className="w-[89vw] h-[88vh] flex flex-col overflow-hidden rounded-xl bg-white dark:bg-slate-900 text-gray-900 dark:text-white shadow-2xl">
+                <div className="shrink-0 flex items-center justify-between px-5 py-1.5 bg-[#2c6291] rounded-t-xl text-white">
+                    <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center">
+                            <BarChart3 size={16} />
                         </div>
                         <div>
-                            <div className="font-semibold leading-tight">POS Reports</div>
-                            <div className="text-xs text-white/80 leading-tight">Sales & Payment Analytics</div>
+                            <div className="font-semibold leading-tight text-sm">POS Reports</div>
+                            <div className="text-[11px] text-white/80 leading-tight">Sales & Payment Analytics</div>
                         </div>
                     </div>
                     <button type="button" onClick={onClose} className="p-1 rounded hover:bg-white/20">
-                        <X size={20} />
+                        <X size={18} />
                     </button>
                 </div>
 
-                <div className="flex-1 min-h-0 flex flex-col px-5 py-3 gap-3">
+                <div className="flex-1 min-h-0 flex flex-col px-3 py-3 gap-3">
                     {/* Filter bar */}
                     <div className="shrink-0 flex flex-wrap items-end gap-3 bg-gray-50 dark:bg-slate-800/60 rounded-lg p-2.5">
                         <div>
@@ -292,6 +390,10 @@ function ReportsModal({ open, onClose }) {
                         <p className="shrink-0 text-sm text-red-600 bg-red-50 dark:bg-red-500/10 rounded-lg px-3 py-2">{printError}</p>
                     )}
 
+                    {loadError && (
+                        <p className="shrink-0 text-sm text-red-600 bg-red-50 dark:bg-red-500/10 rounded-lg px-3 py-2">{loadError}</p>
+                    )}
+
                     {showSkeleton ? (
                         <ReportsSkeleton />
                     ) : (
@@ -302,73 +404,81 @@ function ReportsModal({ open, onClose }) {
                                     <BarChart3 size={15} className="text-blue-500" />
                                     Payment Summary
                                 </h3>
-                                <div className="flex flex-wrap gap-2.5">
+                                <div className="flex flex-wrap gap-3">
                                     {payments.map((p) => {
                                         const Icon = ICONS[p.icon] || HelpCircle;
                                         const accent = ACCENTS[p.icon] || "bg-slate-600";
+                                        const soft = SOFT_ACCENTS[p.icon] || SOFT_ACCENTS.other;
                                         const pct = total > 0 ? ((p.amount / total) * 100).toFixed(1) : "0.0";
                                         return (
                                             <div
                                                 key={p.code || p.label}
-                                                className="flex-1 min-w-[300px] flex items-center justify-between gap-3 rounded-lg border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 px-3 py-2.5 transition-shadow hover:shadow-md"
+                                                className="flex-1 min-w-[170px] flex flex-col rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 shadow-sm hover:shadow-md transition-all overflow-hidden"
                                             >
-                                                {/* Left: icon + label (mirrors legacy .payment-item-info) — shrink-0 so the
-                                                    label is never sacrificed to make room for the amount/badges. */}
-                                                <div className="flex items-center gap-2 shrink-0">
-                                                    <div className={`w-9 h-9 shrink-0 rounded-lg ${accent} text-white flex items-center justify-center`}>
-                                                        <Icon size={16} />
+                                                <div className="flex items-center gap-2 px-3 py-2">
+                                                    <div className={`w-8 h-8 shrink-0 rounded-xl ${accent} text-white flex items-center justify-center`}>
+                                                        <Icon size={15} />
                                                     </div>
-                                                    <span className="text-sm font-semibold text-gray-800 dark:text-slate-100 whitespace-nowrap">{p.label}</span>
-                                                </div>
-
-                                                {/* Right: amount + count + percent, single row (mirrors legacy .payment-item-details) */}
-                                                <div className="flex items-center gap-2 shrink-0">
-                                                    <span className="text-sm font-bold text-gray-900 dark:text-white whitespace-nowrap">
-                                                        ZMW {p.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                    <span className="flex-1 min-w-0 text-[13px] font-semibold text-gray-800 dark:text-slate-100 whitespace-nowrap truncate">
+                                                        {p.label}
                                                     </span>
-                                                    <span className="text-[11px] font-semibold rounded bg-gray-200 dark:bg-slate-600 text-gray-700 dark:text-slate-100 px-1.5 py-0.5 border border-gray-300 dark:border-slate-500">
+                                                    <span className={`shrink-0 text-[10px] font-bold rounded-full px-2 py-1 whitespace-nowrap ${soft}`}>
                                                         {p.count}×
                                                     </span>
-                                                    <span className={`text-[11px] font-semibold rounded text-white px-1.5 py-0.5 ${accent}`}>{pct}%</span>
+                                                </div>
+                                                <div className="h-px bg-gray-100 dark:bg-slate-700" />
+                                                <div className="flex items-center justify-between gap-2 px-3 py-2">
+                                                    <span className="text-[15px] font-extrabold text-gray-900 dark:text-white whitespace-nowrap truncate">
+                                                        ZMW {p.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                    </span>
+                                                    <span className={`shrink-0 text-xs font-bold text-white rounded-full px-2.5 py-1 whitespace-nowrap ${accent}`}>
+                                                        {pct}%
+                                                    </span>
                                                 </div>
                                             </div>
                                         );
                                     })}
-                                    <div className="flex-1 min-w-[300px] flex items-center justify-between gap-3 rounded-lg bg-blue-600 text-white px-3 py-2.5">
-                                        <div className="flex items-center gap-2 shrink-0">
-                                            <div className="w-9 h-9 shrink-0 rounded-lg bg-white/20 flex items-center justify-center">
-                                                <BarChart3 size={16} />
-                                            </div>
-                                            <span className="text-sm font-semibold whitespace-nowrap">Total</span>
-                                        </div>
-                                        <div className="flex items-center gap-2 shrink-0">
-                                            <span className="text-sm font-bold whitespace-nowrap">ZMW {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                                            <span className="text-[11px] font-semibold rounded bg-white text-blue-700 px-1.5 py-0.5">
-                                                {payments.reduce((sum, p) => sum + p.count, 0)}
-                                            </span>
-                                        </div>
-                                    </div>
                                 </div>
                             </div>
 
-                            {/* Totals strip */}
+                            {/* Totals summary card + Total card, together on their own row below the payment method cards */}
                             {totals && (
-                                <div className="shrink-0 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-                                    <div>
-                                        <div className="text-xs text-gray-500 dark:text-slate-400">Total Invoices</div>
-                                        <div className="text-lg font-bold text-blue-600">{entries.length}</div>
+                                <div className="shrink-0 flex flex-wrap gap-3">
+                                    <div className="flex-1 min-w-[150px] flex flex-col justify-center leading-tight rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 shadow-sm px-4 py-1">
+                                        <span className="text-sm text-gray-500 dark:text-slate-400 whitespace-nowrap">Total Invoices</span>
+                                        <span className="text-xl font-bold text-blue-600 whitespace-nowrap">{entries.length}</span>
                                     </div>
-                                    <div>
-                                        <div className="text-xs text-gray-500 dark:text-slate-400">Total Amount</div>
-                                        <div className="text-lg font-bold text-emerald-600">ZMW {totals.total_ttc.toFixed(2)}</div>
+                                    <div className="flex-1 min-w-[150px] flex flex-col justify-center leading-tight rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 shadow-sm px-4 py-1">
+                                        <span className="text-sm text-gray-500 dark:text-slate-400 whitespace-nowrap">Total Amount</span>
+                                        <span className="text-xl font-bold text-emerald-600 whitespace-nowrap">ZMW {totals.total_ttc.toFixed(2)}</span>
                                     </div>
-                                    <div>
-                                        <div className="text-xs text-gray-500 dark:text-slate-400">Received</div>
-                                        <div className="text-lg font-bold text-sky-600">ZMW {totals.received.toFixed(2)}</div>
+                                    <div className="flex-1 min-w-[150px] flex flex-col justify-center leading-tight rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 shadow-sm px-4 py-1">
+                                        <span className="text-sm text-gray-500 dark:text-slate-400 whitespace-nowrap">Received</span>
+                                        <span className="text-xl font-bold text-sky-600 whitespace-nowrap">ZMW {totals.received.toFixed(2)}</span>
                                     </div>
-                                    <div>
-                                        <div className="text-xs text-gray-500 dark:text-slate-400">Pending</div>
-                                        <div className="text-lg font-bold text-amber-500">ZMW {totals.pending.toFixed(2)}</div>
+                                    <div className="flex-1 min-w-[150px] flex flex-col justify-center leading-tight rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 shadow-sm px-4 py-1">
+                                        <span className="text-sm text-gray-500 dark:text-slate-400 whitespace-nowrap">Pending</span>
+                                        <span className="text-xl font-bold text-amber-500 whitespace-nowrap">ZMW {totals.pending.toFixed(2)}</span>
+                                    </div>
+                                    <div className="shrink-0 w-[340px] flex flex-col rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-md shadow-blue-500/30 overflow-hidden">
+                                        <div className="flex items-center gap-2.5 px-4 py-1">
+                                            <div className="w-8 h-8 shrink-0 rounded-xl bg-white/20 flex items-center justify-center">
+                                                <BarChart3 size={15} />
+                                            </div>
+                                            <span className="flex-1 min-w-0 text-base font-semibold whitespace-nowrap truncate">Total</span>
+                                            <div className="w-px h-5 shrink-0 bg-white/20" />
+                                            <span className="shrink-0 text-xs font-bold rounded-full bg-white/20 px-2.5 py-1 whitespace-nowrap">
+                                                {payments.reduce((sum, p) => sum + p.count, 0)}×
+                                            </span>
+                                        </div>
+                                        <div className="h-px bg-white/20" />
+                                        <div className="flex items-center gap-2.5 px-4 py-1">
+                                            <span className="flex-1 min-w-0 text-xl font-extrabold whitespace-nowrap truncate">
+                                                ZMW {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                            </span>
+                                            <div className="w-px h-5 shrink-0 bg-white/20" />
+                                            <span className="shrink-0 text-sm font-bold rounded-full bg-white/20 px-3 py-1 whitespace-nowrap">100%</span>
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -401,7 +511,7 @@ function ReportsModal({ open, onClose }) {
                                     />
                                 </div>
 
-                                <div className="max-h-[45vh] overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700 overflow-y-auto soft-scrollbar">
+                                <div className="reports-entries-scroll flex-1 min-h-0 overflow-x-auto rounded-lg border border-gray-200 dark:border-slate-700 overflow-y-auto soft-scrollbar">
                                     <table className="w-full text-xs">
                                         <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-slate-800 text-gray-500 dark:text-slate-400 uppercase">
                                             <tr>
@@ -418,7 +528,7 @@ function ReportsModal({ open, onClose }) {
                                                 <SortableHeader label="Author" field="author" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <SortableHeader label="Currency" field="currency" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <SortableHeader label="Status" field="status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
-                                                <th className="text-center px-0.5 py-1 text-xs whitespace-nowrap">Actions</th>
+                                                <th className="text-center px-2.5 py-1 text-xs whitespace-nowrap bg-gray-50 dark:bg-slate-800">Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -432,31 +542,38 @@ function ReportsModal({ open, onClose }) {
                                                 visibleEntries.map((entry) => (
                                                     <tr
                                                         key={entry.id}
-                                                        className="border-t border-gray-100 dark:border-slate-800 hover:bg-blue-50 dark:hover:bg-slate-800/60"
+                                                        onClick={() => handleLoadInvoiceToCart(entry)}
+                                                        title={isSettleable(entry) ? "Click to load this invoice into the cart" : undefined}
+                                                        className={`border-t border-gray-100 dark:border-slate-800 hover:bg-blue-50 dark:hover:bg-slate-800/60 ${
+                                                            isSettleable(entry) ? "cursor-pointer" : ""
+                                                        } ${loadingInvoiceId === entry.id ? "opacity-50 pointer-events-none" : ""}`}
                                                     >
-                                                        <td className="px-0.5 py-1 whitespace-nowrap">{entry.date}</td>
-                                                        <td className="px-0.5 py-1 font-semibold whitespace-nowrap">{entry.ref}</td>
-                                                        <td className="px-0.5 py-1 max-w-[90px] truncate">{entry.customer}</td>
-                                                        <td className="px-0.5 py-1 max-w-[85px] truncate">{entry.payment_type}</td>
-                                                        <td className="px-0.5 py-1 text-right">{entry.total_ht.toFixed(2)}</td>
-                                                        <td className="px-0.5 py-1 text-right">{entry.total_tva.toFixed(2)}</td>
-                                                        <td className="px-0.5 py-1 text-right font-semibold">{entry.total_ttc.toFixed(2)}</td>
-                                                        <td className={`px-0.5 py-1 text-right ${entry.pending > 0 ? "text-amber-500 font-semibold" : ""}`}>
+                                                        <td className="px-2.5 py-1 whitespace-nowrap">{entry.date}</td>
+                                                        <td className="px-2.5 py-1 font-semibold whitespace-nowrap">{entry.ref}</td>
+                                                        <td className="px-2.5 py-1 max-w-[90px] truncate">{entry.customer}</td>
+                                                        <td className="px-2.5 py-1 max-w-[85px] truncate">{entry.payment_type}</td>
+                                                        <td className="px-2.5 py-1 text-right">{entry.total_ht.toFixed(2)}</td>
+                                                        <td className="px-2.5 py-1 text-right">{entry.total_tva.toFixed(2)}</td>
+                                                        <td className="px-2.5 py-1 text-right font-semibold">{entry.total_ttc.toFixed(2)}</td>
+                                                        <td className={`px-2.5 py-1 text-right ${entry.pending > 0 ? "text-amber-500 font-semibold" : ""}`}>
                                                             {entry.pending.toFixed(2)}
                                                         </td>
-                                                        <td className={`px-0.5 py-1 text-right ${entry.change > 0 ? "text-emerald-600 font-semibold" : ""}`}>
+                                                        <td className={`px-2.5 py-1 text-right ${entry.change > 0 ? "text-emerald-600 font-semibold" : ""}`}>
                                                             {entry.change.toFixed(2)}
                                                         </td>
-                                                        <td className="px-0.5 py-1 text-right">{entry.received.toFixed(2)}</td>
-                                                        <td className="px-0.5 py-1 whitespace-nowrap">{entry.author}</td>
-                                                        <td className="px-0.5 py-1 whitespace-nowrap">{entry.currency}</td>
-                                                        <td className="px-0.5 py-1 max-w-[85px]">{entry.status}</td>
-                                                        <td className="px-0.5 py-1 text-center">
+                                                        <td className="px-2.5 py-1 text-right">{entry.received.toFixed(2)}</td>
+                                                        <td className="px-2.5 py-1 whitespace-nowrap">{entry.author}</td>
+                                                        <td className="px-2.5 py-1 whitespace-nowrap">{entry.currency}</td>
+                                                        <td className="px-2.5 py-1 whitespace-nowrap">{entry.status}</td>
+                                                        <td className="px-2.5 py-1 text-center">
                                                             <button
                                                                 type="button"
                                                                 title="Print Invoice"
                                                                 disabled={printingId === entry.id}
-                                                                onClick={() => handlePrintInvoice(entry)}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handlePrintInvoice(entry);
+                                                                }}
                                                                 className="p-1 rounded-md border border-gray-200 dark:border-slate-600 text-gray-500 dark:text-slate-300 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600 dark:hover:bg-blue-500/10 dark:hover:border-blue-500 dark:hover:text-blue-400 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-wait"
                                                             >
                                                                 {printingId === entry.id ? (
@@ -473,15 +590,15 @@ function ReportsModal({ open, onClose }) {
                                         {totals && filteredEntries.length > 0 && (
                                             <tfoot className="sticky bottom-0 z-10 bg-gray-50 dark:bg-slate-800 font-semibold shadow-[0_-1px_0_0_rgba(0,0,0,0.1)]">
                                                 <tr>
-                                                    <td colSpan={4} className="text-right px-0.5 py-1">
+                                                    <td colSpan={4} className="text-right px-2.5 py-1">
                                                         Total
                                                     </td>
-                                                    <td className="text-right px-0.5 py-1">{displayTotals.total_ht.toFixed(2)}</td>
-                                                    <td className="text-right px-0.5 py-1">{displayTotals.total_tva.toFixed(2)}</td>
-                                                    <td className="text-right px-0.5 py-1">{displayTotals.total_ttc.toFixed(2)}</td>
-                                                    <td className="text-right px-0.5 py-1">{displayTotals.pending.toFixed(2)}</td>
-                                                    <td className="text-right px-0.5 py-1 text-emerald-600">{displayTotals.change.toFixed(2)}</td>
-                                                    <td className="text-right px-0.5 py-1">{displayTotals.received.toFixed(2)}</td>
+                                                    <td className="text-right px-2.5 py-1">{displayTotals.total_ht.toFixed(2)}</td>
+                                                    <td className="text-right px-2.5 py-1">{displayTotals.total_tva.toFixed(2)}</td>
+                                                    <td className="text-right px-2.5 py-1">{displayTotals.total_ttc.toFixed(2)}</td>
+                                                    <td className="text-right px-2.5 py-1">{displayTotals.pending.toFixed(2)}</td>
+                                                    <td className="text-right px-2.5 py-1 text-emerald-600">{displayTotals.change.toFixed(2)}</td>
+                                                    <td className="text-right px-2.5 py-1">{displayTotals.received.toFixed(2)}</td>
                                                     <td colSpan={4}></td>
                                                 </tr>
                                             </tfoot>
@@ -490,7 +607,7 @@ function ReportsModal({ open, onClose }) {
                                 </div>
 
                                 {/* Pagination footer, mirrors legacy's "Showing X to Y of Z entries" + page controls */}
-                                <div className="shrink-0 flex items-center justify-between gap-3 mt-2 text-sm text-gray-500 dark:text-slate-400">
+                                <div className="shrink-0 flex items-center justify-between gap-3 mt-1 text-xs text-gray-500 dark:text-slate-400">
                                     <span>
                                         Showing {rangeStart} to {rangeEnd} of {filteredEntries.length} entries
                                     </span>
@@ -500,28 +617,28 @@ function ReportsModal({ open, onClose }) {
                                                 type="button"
                                                 disabled={safePage <= 1}
                                                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                                                className={`w-7 h-7 flex items-center justify-center rounded border font-semibold transition-colors ${
+                                                className={`w-6 h-6 flex items-center justify-center rounded border font-semibold transition-colors ${
                                                     safePage <= 1
                                                         ? "border-gray-200 dark:border-slate-700 text-gray-300 dark:text-slate-600 cursor-not-allowed"
                                                         : "border-blue-500 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 cursor-pointer"
                                                 }`}
                                             >
-                                                <ChevronLeft size={14} />
+                                                <ChevronLeft size={12} />
                                             </button>
-                                            <span className="w-8 h-7 flex items-center justify-center rounded bg-blue-600 text-white font-semibold">
+                                            <span className="w-7 h-6 flex items-center justify-center rounded bg-blue-600 text-white font-semibold">
                                                 {safePage}
                                             </span>
                                             <button
                                                 type="button"
                                                 disabled={safePage >= totalPages}
                                                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                                                className={`w-7 h-7 flex items-center justify-center rounded border font-semibold transition-colors ${
+                                                className={`w-6 h-6 flex items-center justify-center rounded border font-semibold transition-colors ${
                                                     safePage >= totalPages
                                                         ? "border-gray-200 dark:border-slate-700 text-gray-300 dark:text-slate-600 cursor-not-allowed"
                                                         : "border-blue-500 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 cursor-pointer"
                                                 }`}
                                             >
-                                                <ChevronRight size={14} />
+                                                <ChevronRight size={12} />
                                             </button>
                                         </div>
                                     )}
@@ -532,11 +649,11 @@ function ReportsModal({ open, onClose }) {
                 </div>
 
                 {/* Footer: Close + Export, mirrors legacy's Export Excel / Export PDF buttons */}
-                <div className="shrink-0 flex items-center justify-end gap-2.5 px-5 py-3 border-t border-gray-200 dark:border-slate-700">
+                <div className="shrink-0 flex items-center justify-end gap-2.5 px-5 py-1.5 border-t border-gray-200 dark:border-slate-700">
                     <button
                         type="button"
                         onClick={onClose}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold border border-gray-300 dark:border-slate-600 text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 hover:border-gray-400 dark:hover:border-slate-500 cursor-pointer transition-colors"
+                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold border border-gray-300 dark:border-slate-600 text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 hover:border-gray-400 dark:hover:border-slate-500 cursor-pointer transition-colors"
                     >
                         <X size={14} />
                         Close
@@ -545,7 +662,7 @@ function ReportsModal({ open, onClose }) {
                         type="button"
                         onClick={handleExportExcel}
                         disabled={showSkeleton || exportingExcel}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-md shadow-emerald-500/30 hover:from-emerald-600 hover:to-emerald-700 hover:shadow-lg hover:shadow-emerald-500/40 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:shadow-none"
+                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-md shadow-emerald-500/30 hover:from-emerald-600 hover:to-emerald-700 hover:shadow-lg hover:shadow-emerald-500/40 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:shadow-none"
                     >
                         {exportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
                         Export Excel
@@ -554,7 +671,7 @@ function ReportsModal({ open, onClose }) {
                         type="button"
                         onClick={handleExportPDF}
                         disabled={showSkeleton}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-b from-red-500 to-red-600 shadow-md shadow-red-500/30 hover:from-red-600 hover:to-red-700 hover:shadow-lg hover:shadow-red-500/40 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:shadow-none"
+                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-b from-red-500 to-red-600 shadow-md shadow-red-500/30 hover:from-red-600 hover:to-red-700 hover:shadow-lg hover:shadow-red-500/40 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:shadow-none"
                     >
                         <FileDown size={14} />
                         Export PDF
@@ -572,7 +689,7 @@ function SortableHeader({ label, field, sortField, sortDir, onSort, align = "lef
     return (
         <th
             onClick={() => onSort(field)}
-            className={`px-0.5 py-1.5 text-xs whitespace-nowrap cursor-pointer select-none hover:text-gray-700 dark:hover:text-slate-200 ${
+            className={`px-2.5 py-1.5 text-xs whitespace-nowrap cursor-pointer select-none bg-gray-50 dark:bg-slate-800 hover:text-gray-700 dark:hover:text-slate-200 ${
                 align === "right" ? "text-right" : "text-left"
             }`}
         >

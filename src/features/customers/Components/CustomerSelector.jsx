@@ -101,7 +101,7 @@ function CustomerSelector() {
                             setOpen(false);
                             setAddCustomerOpen(true);
                         }}
-                        className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-blue-600 dark:text-blue-300 text-xs sm:text-sm font-semibold bg-gray-50 dark:bg-slate-700/50 hover:bg-gray-100 dark:hover:bg-slate-700 border-b border-gray-200 dark:border-slate-700"
+                        className="sticky top-0 z-10 w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-blue-600 dark:text-blue-300 text-xs sm:text-sm font-semibold bg-gray-50 dark:bg-slate-700 hover:bg-gray-100 dark:hover:bg-slate-600 border-b border-gray-200 dark:border-slate-700"
                     >
                         <UserPlus size={14} />
                         Add New Customer

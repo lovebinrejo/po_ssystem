@@ -18,6 +18,7 @@ export function useSplitPayment() {
         terminalNumber,
         socid,
         total,
+        existingInvoiceId,
         submitting,
         setSubmitting,
         error,
@@ -46,7 +47,10 @@ export function useSplitPayment() {
         setSubmitting(true);
         setError("");
         const baseLines = buildPaymentLines(cart);
-        let invoiceId = null;
+        // Settling a Reports invoice starts with its id already known (and its
+        // lines already on the invoice) — a brand-new sale starts with neither,
+        // and the first successful call below fills invoiceId in for the rest.
+        let invoiceId = existingInvoiceId || null;
         let invoiceRef = "";
 
         try {
@@ -56,8 +60,9 @@ export function useSplitPayment() {
 
                 const res = await submitPayment({
                     socid,
-                    // Only the first call needs the cart lines — once the invoice
-                    // exists, subsequent calls just add a payment to it.
+                    // Only the first call for a brand-new sale needs the cart
+                    // lines — once the invoice exists (or already existed),
+                    // subsequent calls just add a payment to it.
                     lines: invoiceId ? [] : baseLines,
                     payment_method_code: line.method,
                     payment_amount: amount,

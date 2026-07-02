@@ -21,6 +21,14 @@ const usePosStore = create(
             cart: [],
             toast: null,
 
+            // Set while a cart holds lines loaded from an already-validated Reports
+            // invoice (legacy: "Pending Payment Mode") instead of a fresh sale —
+            // { id, ref, remainToPay } of that invoice, keyed per parallel-sale place
+            // the same way cartsByPlace is, so switching sales doesn't cross-wire
+            // which cart is meant to settle which invoice.
+            pendingInvoicesByPlace: {},
+            pendingInvoice: null,
+
             // False until the persisted cartsByPlace/activePlace have been
             // read back from localStorage (onRehydrateStorage below runs
             // asynchronously, after the first render) — so screens relying
@@ -37,9 +45,9 @@ const usePosStore = create(
 
             setSearchTerm: (searchTerm) => set({ searchTerm }),
 
-            showToast: (message) => {
+            showToast: (message, type = "success") => {
                 const id = Date.now();
-                set({ toast: { id, message } });
+                set({ toast: { id, message, type } });
                 setTimeout(() => {
                     if (get().toast?.id === id) set({ toast: null });
                 }, 2500);
@@ -57,10 +65,13 @@ const usePosStore = create(
                 get().showToast(`Added ${product.name} to cart`);
             },
 
+            // Locked (pending-invoice) items are never mutated by qty +/- or
+            // remove — enforced here too, not just by hiding the buttons in the
+            // UI, since legacy's own equivalent is UI-only and easy to bypass.
             changeQty: (id, delta) => {
                 const place = get().activePlace;
                 const updatedCart = (get().cartsByPlace[place] || [])
-                    .map((item) => (item.id === id ? { ...item, qty: item.qty + delta } : item))
+                    .map((item) => (item.id === id && !item.locked ? { ...item, qty: item.qty + delta } : item))
                     .filter((item) => item.qty > 0);
 
                 set({ cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart }, cart: updatedCart });
@@ -68,7 +79,7 @@ const usePosStore = create(
 
             removeFromCart: (id) => {
                 const place = get().activePlace;
-                const updatedCart = (get().cartsByPlace[place] || []).filter((item) => item.id !== id);
+                const updatedCart = (get().cartsByPlace[place] || []).filter((item) => !(item.id === id && !item.locked));
 
                 set({ cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart }, cart: updatedCart });
             },
@@ -84,25 +95,67 @@ const usePosStore = create(
 
             clearCart: () => {
                 const place = get().activePlace;
-                set({ cartsByPlace: { ...get().cartsByPlace, [place]: [] }, cart: [] });
+                const remainingPending = { ...get().pendingInvoicesByPlace };
+                delete remainingPending[place];
+                set({
+                    cartsByPlace: { ...get().cartsByPlace, [place]: [] },
+                    cart: [],
+                    pendingInvoicesByPlace: remainingPending,
+                    pendingInvoice: null,
+                });
+            },
+
+            // Loads a Reports invoice's lines into the active cart as locked items
+            // (legacy: loadInvoiceToCart) and marks that cart as settling this
+            // invoice rather than starting a new sale.
+            loadInvoiceIntoCart: ({ id, ref, remainToPay, items }) => {
+                const place = get().activePlace;
+                const lockedItems = items.map((item) => ({ ...item, locked: true }));
+                const pendingInvoice = { id, ref, remainToPay };
+                set({
+                    cartsByPlace: { ...get().cartsByPlace, [place]: lockedItems },
+                    cart: lockedItems,
+                    pendingInvoicesByPlace: { ...get().pendingInvoicesByPlace, [place]: pendingInvoice },
+                    pendingInvoice,
+                });
+            },
+
+            // Legacy: "Cancel & New Sale" — bails out of Pending Payment Mode
+            // without settling, clearing both the locked cart and the pending link.
+            cancelPendingInvoice: () => {
+                const place = get().activePlace;
+                const remainingPending = { ...get().pendingInvoicesByPlace };
+                delete remainingPending[place];
+                set({
+                    cartsByPlace: { ...get().cartsByPlace, [place]: [] },
+                    cart: [],
+                    pendingInvoicesByPlace: remainingPending,
+                    pendingInvoice: null,
+                });
             },
 
             // Opens a new, independent sale (legacy: createNewParallelSale) and switches to it.
             createNewSale: () => {
-                const { sales, cartsByPlace } = get();
+                const { sales, cartsByPlace, pendingInvoicesByPlace } = get();
                 const newPlace = `0-${sales.length}`;
                 set({
                     sales: [...sales, { place: newPlace, time: getCurrentTime() }],
                     cartsByPlace: { ...cartsByPlace, [newPlace]: [] },
+                    pendingInvoicesByPlace: { ...pendingInvoicesByPlace, [newPlace]: null },
                     activePlace: newPlace,
                     cart: [],
+                    pendingInvoice: null,
                 });
                 return newPlace;
             },
 
             // Swaps the active cart without losing the one being left (legacy: switchPlace).
             switchSale: (place) => {
-                set({ activePlace: place, cart: get().cartsByPlace[place] || [] });
+                set({
+                    activePlace: place,
+                    cart: get().cartsByPlace[place] || [],
+                    pendingInvoice: get().pendingInvoicesByPlace[place] || null,
+                });   
             },
 
             // Re-stamps the main sale's (place '0') displayed start time to now.
@@ -120,23 +173,27 @@ const usePosStore = create(
             // Discards a parallel sale. Legacy only protects place '0' (the main
             // sale) from deletion — any other sale can always be closed.
             deleteSale: (place) => {
-                const { sales, activePlace, cartsByPlace } = get();
+                const { sales, activePlace, cartsByPlace, pendingInvoicesByPlace } = get();
                 if (place === "0") return false;
 
                 const remainingSales = sales.filter((sale) => sale.place !== place);
                 const remainingCarts = { ...cartsByPlace };
                 delete remainingCarts[place];
+                const remainingPending = { ...pendingInvoicesByPlace };
+                delete remainingPending[place];
 
                 if (activePlace === place) {
                     const nextPlace = "0";
                     set({
                         sales: remainingSales,
                         cartsByPlace: remainingCarts,
+                        pendingInvoicesByPlace: remainingPending,
                         activePlace: nextPlace,
                         cart: remainingCarts[nextPlace] || [],
+                        pendingInvoice: remainingPending[nextPlace] || null,
                     });
                 } else {
-                    set({ sales: remainingSales, cartsByPlace: remainingCarts });
+                    set({ sales: remainingSales, cartsByPlace: remainingCarts, pendingInvoicesByPlace: remainingPending });
                 }
                 return true;
             },
@@ -150,10 +207,12 @@ const usePosStore = create(
                 sales: state.sales,
                 activePlace: state.activePlace,
                 cartsByPlace: state.cartsByPlace,
+                pendingInvoicesByPlace: state.pendingInvoicesByPlace,
             }),
             onRehydrateStorage: () => (state) => {
                 if (state) {
                     state.cart = state.cartsByPlace[state.activePlace] || [];
+                    state.pendingInvoice = (state.pendingInvoicesByPlace || {})[state.activePlace] || null;
                     state.hasHydrated = true;
                 }
             },

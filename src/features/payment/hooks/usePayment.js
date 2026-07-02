@@ -16,6 +16,8 @@ export function usePayment() {
         terminalNumber,
         socid,
         total,
+        existingInvoiceId,
+        pendingInvoice,
         submitting,
         setSubmitting,
         error,
@@ -49,11 +51,14 @@ export function usePayment() {
         try {
             const res = await submitPayment({
                 socid,
-                lines: buildPaymentLines(cart),
+                // An existing (already-validated) invoice already has its lines —
+                // the backend only adds `lines` to invoices still in draft.
+                lines: existingInvoiceId ? [] : buildPaymentLines(cart),
                 payment_method_code: methodCode,
                 payment_amount: amount,
                 terminal: terminalNumber,
                 place: parseInt(activePlace, 10) || 0,
+                ...(existingInvoiceId ? { existing_invoice_id: existingInvoiceId } : {}),
             });
 
             if (!res.success) throw new Error(res.error || "Payment failed");
@@ -114,6 +119,7 @@ export function usePayment() {
         subtotalExcl,
         tax,
         total,
+        pendingInvoice,
         selectedMethod,
         setSelectedMethod,
         amountTendered,

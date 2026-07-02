@@ -106,6 +106,7 @@ function PosSidebar({ onLogout }) {
     // from the server, overwrite the cache, and refresh what's on screen.
     const handleSyncCache = async () => {
         setSyncing(true);
+        showToast("🔄 Syncing data from server...", "info");
         try {
             const result = await refreshCache();
             await Promise.all([

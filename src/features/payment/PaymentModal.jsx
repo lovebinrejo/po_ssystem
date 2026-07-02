@@ -50,7 +50,7 @@ function PaymentModal({ open, onClose }) {
                 <div className="flex items-center justify-between px-6 py-2.5 bg-[#2c6291] rounded-t-2xl text-white">
                     <div className="flex items-center gap-2 text-lg font-semibold">
                         <CreditCard size={20} />
-                        Complete Payment
+                        {payment.pendingInvoice ? `Settle Invoice ${payment.pendingInvoice.ref}` : "Complete Payment"}
                     </div>
                     {!payment.submitting && (
                         <button type="button" onClick={handleClose} className="p-1 rounded hover:bg-white/20">
