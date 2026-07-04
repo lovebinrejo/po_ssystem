@@ -4,6 +4,7 @@ import CustomerSelector from "../../customers/Components/CustomerSelector";
 import OrderTypeBar from "../../tables/Components/OrderTypeBar";
 import EditCartItemModal from "./EditCartItemModal";
 import PaymentModal from "../../payment/PaymentModal";
+import ConfirmDialog from "../../../components/ConfirmDialog";
 import useAuthStore from "../../authentication/stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
 
@@ -20,8 +21,10 @@ function CartPanel({ cart, onChangeQty, onRemove, total, cashSessionOpen = true 
     const updateCartItem = usePosStore((state) => state.updateCartItem);
     const pendingInvoice = usePosStore((state) => state.pendingInvoice);
     const cancelPendingInvoice = usePosStore((state) => state.cancelPendingInvoice);
+    const showToast = usePosStore((state) => state.showToast);
     const [editingItem, setEditingItem] = useState(null);
     const [paymentOpen, setPaymentOpen] = useState(false);
+    const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
     const itemCount = cart.reduce((sum, item) => sum + item.qty, 0);
     const subtotalExcl = total / (1 + TAX_RATE);
     const tax = total - subtotalExcl;
@@ -46,7 +49,7 @@ function CartPanel({ cart, onChangeQty, onRemove, total, cashSessionOpen = true 
                     </div>
                     <button
                         type="button"
-                        onClick={cancelPendingInvoice}
+                        onClick={() => setConfirmCancelOpen(true)}
                         title="Cancel & New Sale"
                         className="shrink-0 flex items-center gap-1 px-1.5 sm:px-2 py-1 rounded-md text-[9px] sm:text-[10px] font-semibold text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-500/40 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors"
                     >
@@ -196,6 +199,20 @@ function CartPanel({ cart, onChangeQty, onRemove, total, cashSessionOpen = true 
             />
 
             <PaymentModal open={paymentOpen} onClose={() => setPaymentOpen(false)} />
+
+            <ConfirmDialog
+                open={confirmCancelOpen}
+                title="Cancel pending payment and start a new sale?"
+                message="This will clear the current cart and reset the payment state."
+                confirmLabel="Cancel Payment"
+                cancelLabel="Keep Cart"
+                onCancel={() => setConfirmCancelOpen(false)}
+                onConfirm={() => {
+                    cancelPendingInvoice();
+                    setConfirmCancelOpen(false);
+                    showToast("Pending payment canceled. Ready for new sale.");
+                }}
+            />
         </div>
     );
 }
