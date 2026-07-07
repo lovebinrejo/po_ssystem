@@ -33,8 +33,17 @@ export function usePayment() {
     const subtotalExcl = total / (1 + TAX_RATE);
     const tax = total - subtotalExcl;
 
+    const draftInvoice = usePosStore((state) => state.draftInvoice);
+    const setDraftInvoice = usePosStore((state) => state.setDraftInvoice);
+
     const [selectedMethod, setSelectedMethod] = useState("01");
     const [amountTendered, setAmountTendered] = useState(total.toFixed(2));
+    const [savingDraft, setSavingDraft] = useState(false);
+
+    // draftInvoice is cleared by the store the moment the cart is edited
+    // (add/remove/qty change) — so its mere presence already means "still
+    // matches what's saved," and settling can safely reuse it.
+    const draftInvoiceId = draftInvoice?.id || null;
 
     // Keep the tendered amount defaulted to the live total while the cart can
     // still change (mirrors legacy's openPaymentModal() re-seeding amount on
@@ -49,16 +58,20 @@ export function usePayment() {
         setSubmitting(true);
         setError("");
         try {
+            // A cart already saved as a Draft has a validated invoice sitting
+            // behind it (see saveDraft below) — settle that same invoice
+            // instead of creating a second one for the same sale.
+            const settleInvoiceId = existingInvoiceId || draftInvoiceId;
             const res = await submitPayment({
                 socid,
                 // An existing (already-validated) invoice already has its lines —
                 // the backend only adds `lines` to invoices still in draft.
-                lines: existingInvoiceId ? [] : buildPaymentLines(cart),
+                lines: settleInvoiceId ? [] : buildPaymentLines(cart),
                 payment_method_code: methodCode,
                 payment_amount: amount,
                 terminal: terminalNumber,
                 place: parseInt(activePlace, 10) || 0,
-                ...(existingInvoiceId ? { existing_invoice_id: existingInvoiceId } : {}),
+                ...(settleInvoiceId ? { existing_invoice_id: settleInvoiceId } : {}),
             });
 
             if (!res.success) throw new Error(res.error || "Payment failed");
@@ -72,6 +85,50 @@ export function usePayment() {
     };
 
     const completePayment = () => settlePayment(selectedMethod, parseFloat(amountTendered) || 0);
+
+    // Saves the current cart as a validated-but-unpaid invoice via
+    // api/pos/payment's deferred_payment flag (create+validate, skip
+    // recording a Paiement row) — real backend logic, but not otherwise
+    // exercised by this app today (payViaLenco settles normally after the
+    // widget succeeds, never using this flag). The invoice lands in Reports
+    // as "Pending". The cart is deliberately left as-is (not cleared): the
+    // cashier keeps working the same sale, cart items just flip to a
+    // "Pending" badge, and settlePayment above reuses this invoice via
+    // existing_invoice_id when the cart hasn't been touched since.
+    const saveDraft = async () => {
+        if (cart.length === 0 || pendingInvoice || draftInvoiceId) return;
+        // Reference snapshot: posStore's cart mutations always replace the
+        // array (never mutate in place), so if this reference differs once
+        // the request resolves, the cashier changed the cart mid-request —
+        // the invoice we're about to link no longer matches it.
+        const cartSnapshot = cart;
+        setSavingDraft(true);
+        setError("");
+        try {
+            const res = await submitPayment({
+                socid,
+                lines: buildPaymentLines(cart),
+                payment_method_code: selectedMethod,
+                payment_amount: total,
+                terminal: terminalNumber,
+                place: parseInt(activePlace, 10) || 0,
+                deferred_payment: true,
+            });
+
+            if (!res.success) throw new Error(res.error || "Failed to save draft");
+
+            if (usePosStore.getState().cart === cartSnapshot) {
+                setDraftInvoice({ id: res.invoice_id, ref: res.invoice_ref });
+                showToast(`Draft saved successfully — ${res.invoice_ref}`);
+            } else {
+                showToast(`Draft saved successfully — ${res.invoice_ref} (cart changed meanwhile, re-save to link it)`);
+            }
+        } catch (err) {
+            handleError(err);
+        } finally {
+            setSavingDraft(false);
+        }
+    };
 
     // Called when the modal is dismissed after a completed sale, so the next
     // "Proceed to Payment" starts clean instead of re-showing this receipt.
@@ -130,5 +187,8 @@ export function usePayment() {
         completePayment,
         payViaLenco,
         resetForNewSale,
+        saveDraft,
+        savingDraft,
+        draftInvoice,
     };
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ShoppingCart, Plus, Minus, Trash2, CreditCard, Lock, XCircle, Clock } from "lucide-react";
+import { ShoppingCart, Plus, Minus, Trash2, CreditCard, Lock, XCircle, Clock, Save } from "lucide-react";
 import CustomerSelector from "../../customers/Components/CustomerSelector";
 import OrderTypeBar from "../../tables/Components/OrderTypeBar";
 import EditCartItemModal from "./EditCartItemModal";
@@ -7,6 +7,7 @@ import PaymentModal from "../../payment/PaymentModal";
 import ConfirmDialog from "../../../components/ConfirmDialog";
 import useAuthStore from "../../authentication/stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
+import { usePayment } from "../../payment/hooks/usePayment";
 
 // Product prices from the legacy API are tax-inclusive (price_ttc) and don't
 // carry a per-product tax rate yet, so the Subtotal/Tax split below is a flat
@@ -22,6 +23,7 @@ function CartPanel({ cart, onChangeQty, onRemove, total, cashSessionOpen = true 
     const pendingInvoice = usePosStore((state) => state.pendingInvoice);
     const cancelPendingInvoice = usePosStore((state) => state.cancelPendingInvoice);
     const showToast = usePosStore((state) => state.showToast);
+    const { saveDraft, savingDraft, draftInvoice } = usePayment();
     const [editingItem, setEditingItem] = useState(null);
     const [paymentOpen, setPaymentOpen] = useState(false);
     const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
@@ -104,9 +106,15 @@ function CartPanel({ cart, onChangeQty, onRemove, total, cashSessionOpen = true 
                                     >
                                         <div className="flex items-center gap-1 min-w-0">
                                             <span className="text-[11px] sm:text-sm font-medium truncate">{item.name}</span>
-                                            <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[8px] sm:text-[9px] font-medium bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-slate-300 border border-gray-300 dark:border-slate-600">
-                                                📝 Draft
-                                            </span>
+                                            {draftInvoice ? (
+                                                <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[8px] sm:text-[9px] font-medium bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-500/30">
+                                                    <Clock size={8} /> Pending
+                                                </span>
+                                            ) : (
+                                                <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[8px] sm:text-[9px] font-medium bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-slate-300 border border-gray-300 dark:border-slate-600">
+                                                    📝 Draft
+                                                </span>
+                                            )}
                                         </div>
                                         {item.ref && (
                                             <div className="text-[9px] sm:text-[11px] text-gray-400 dark:text-slate-500 truncate">{item.ref}</div>
@@ -180,16 +188,30 @@ function CartPanel({ cart, onChangeQty, onRemove, total, cashSessionOpen = true 
                 </div>
             </div>
 
-            <button
-                type="button"
-                disabled={cart.length === 0 || !cashSessionOpen}
-                onClick={() => setPaymentOpen(true)}
-                className="shrink-0 mt-2 sm:mt-4 w-full flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg py-2 sm:py-3 text-[11px] sm:text-sm font-semibold border border-transparent text-white bg-gradient-to-r from-green-500 to-emerald-400 shadow-md shadow-green-500/30 transition-all hover:from-green-400 hover:to-emerald-300 hover:shadow-lg hover:shadow-green-500/40 active:scale-[0.98] disabled:bg-gradient-to-r disabled:from-gray-100 disabled:to-gray-100 disabled:border-gray-300 disabled:text-gray-400 disabled:shadow-none disabled:cursor-not-allowed dark:disabled:from-slate-800 dark:disabled:to-slate-800 dark:disabled:border-slate-600 dark:disabled:text-slate-500"
-            >
-                <CreditCard size={14} className="sm:w-4 sm:h-4 shrink-0" />
-                <span className="hidden sm:inline">{pendingInvoice ? "Settle Invoice" : "Proceed to Payment"}</span>
-                <span className="sm:hidden">Pay</span>
-            </button>
+            <div className="shrink-0 mt-2 sm:mt-4 flex items-center gap-1.5 sm:gap-2">
+                {!pendingInvoice && (
+                    <button
+                        type="button"
+                        disabled={cart.length === 0 || !cashSessionOpen || savingDraft || !!draftInvoice}
+                        onClick={saveDraft}
+                        title={draftInvoice ? `Draft saved successfully — ${draftInvoice.ref}` : "Save as draft"}
+                        className="shrink-0 flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg py-2 sm:py-3 px-2.5 sm:px-3.5 text-[11px] sm:text-sm font-semibold border border-gray-300 dark:border-slate-600 text-gray-600 dark:text-slate-300 bg-gray-100 dark:bg-slate-700 shadow-sm transition-all hover:bg-gray-200 dark:hover:bg-slate-600 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <Save size={14} className="sm:w-4 sm:h-4 shrink-0" />
+                        <span className="hidden sm:inline">{savingDraft ? "Saving..." : draftInvoice ? "Drafted" : "Draft"}</span>
+                    </button>
+                )}
+                <button
+                    type="button"
+                    disabled={cart.length === 0 || !cashSessionOpen}
+                    onClick={() => setPaymentOpen(true)}
+                    className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg py-2 sm:py-3 text-[11px] sm:text-sm font-semibold border border-transparent text-white bg-gradient-to-r from-green-500 to-emerald-400 shadow-md shadow-green-500/30 transition-all hover:from-green-400 hover:to-emerald-300 hover:shadow-lg hover:shadow-green-500/40 active:scale-[0.98] disabled:bg-gradient-to-r disabled:from-gray-100 disabled:to-gray-100 disabled:border-gray-300 disabled:text-gray-400 disabled:shadow-none disabled:cursor-not-allowed dark:disabled:from-slate-800 dark:disabled:to-slate-800 dark:disabled:border-slate-600 dark:disabled:text-slate-500"
+                >
+                    <CreditCard size={14} className="sm:w-4 sm:h-4 shrink-0" />
+                    <span className="hidden sm:inline">{pendingInvoice ? "Settle Invoice" : "Proceed to Payment"}</span>
+                    <span className="sm:hidden">Pay</span>
+                </button>
+            </div>
 
             <EditCartItemModal
                 item={editingItem}

@@ -29,6 +29,16 @@ const usePosStore = create(
             pendingInvoicesByPlace: {},
             pendingInvoice: null,
 
+            // Set after the Draft button saves the active cart as a validated-
+            // but-unpaid invoice (deferred_payment) — { id, ref } of that
+            // invoice, keyed per place like pendingInvoicesByPlace. Unlike
+            // pendingInvoice this does NOT lock the cart: the cashier can keep
+            // editing it, which is exactly why every cart-mutating action below
+            // clears it again — a stale link would let "Proceed to Payment"
+            // reuse an invoice whose lines no longer match the cart.
+            draftInvoicesByPlace: {},
+            draftInvoice: null,
+
             // False until the persisted cartsByPlace/activePlace have been
             // read back from localStorage (onRehydrateStorage below runs
             // asynchronously, after the first render) — so screens relying
@@ -53,6 +63,16 @@ const usePosStore = create(
                 }, 2500);
             },
 
+            // Drops place's draftInvoice link (if any) — call whenever a cart
+            // mutation means a previously-saved draft invoice's lines no
+            // longer match what's in the cart.
+            invalidateDraftInvoice: (place) => {
+                if (!get().draftInvoicesByPlace[place]) return {};
+                const remainingDrafts = { ...get().draftInvoicesByPlace };
+                delete remainingDrafts[place];
+                return { draftInvoicesByPlace: remainingDrafts, draftInvoice: place === get().activePlace ? null : get().draftInvoice };
+            },
+
             addToCart: (product, qty = 1) => {
                 const place = get().activePlace;
                 const currentCart = get().cartsByPlace[place] || [];
@@ -61,7 +81,11 @@ const usePosStore = create(
                     ? currentCart.map((item) => (item.id === product.id ? { ...item, qty: item.qty + qty } : item))
                     : [...currentCart, { ...product, qty }];
 
-                set({ cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart }, cart: updatedCart });
+                set({
+                    cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart },
+                    cart: updatedCart,
+                    ...get().invalidateDraftInvoice(place),
+                });
                 get().showToast(`Added ${product.name} to cart`);
             },
 
@@ -74,14 +98,34 @@ const usePosStore = create(
                     .map((item) => (item.id === id && !item.locked ? { ...item, qty: item.qty + delta } : item))
                     .filter((item) => item.qty > 0);
 
-                set({ cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart }, cart: updatedCart });
+                set({
+                    cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart },
+                    cart: updatedCart,
+                    ...get().invalidateDraftInvoice(place),
+                });
             },
 
             removeFromCart: (id) => {
                 const place = get().activePlace;
                 const updatedCart = (get().cartsByPlace[place] || []).filter((item) => !(item.id === id && !item.locked));
 
-                set({ cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart }, cart: updatedCart });
+                set({
+                    cartsByPlace: { ...get().cartsByPlace, [place]: updatedCart },
+                    cart: updatedCart,
+                    ...get().invalidateDraftInvoice(place),
+                });
+            },
+
+            // Called after the Draft button successfully saves the current
+            // cart — links this place's cart to the resulting invoice so
+            // "Proceed to Payment" can settle it via existing_invoice_id
+            // instead of creating a duplicate.
+            setDraftInvoice: (invoice) => {
+                const place = get().activePlace;
+                set({
+                    draftInvoicesByPlace: { ...get().draftInvoicesByPlace, [place]: invoice },
+                    draftInvoice: invoice,
+                });
             },
 
             updateCartItem: (id, updates) => {
@@ -97,11 +141,15 @@ const usePosStore = create(
                 const place = get().activePlace;
                 const remainingPending = { ...get().pendingInvoicesByPlace };
                 delete remainingPending[place];
+                const remainingDrafts = { ...get().draftInvoicesByPlace };
+                delete remainingDrafts[place];
                 set({
                     cartsByPlace: { ...get().cartsByPlace, [place]: [] },
                     cart: [],
                     pendingInvoicesByPlace: remainingPending,
                     pendingInvoice: null,
+                    draftInvoicesByPlace: remainingDrafts,
+                    draftInvoice: null,
                 });
             },
 
@@ -126,25 +174,31 @@ const usePosStore = create(
                 const place = get().activePlace;
                 const remainingPending = { ...get().pendingInvoicesByPlace };
                 delete remainingPending[place];
+                const remainingDrafts = { ...get().draftInvoicesByPlace };
+                delete remainingDrafts[place];
                 set({
                     cartsByPlace: { ...get().cartsByPlace, [place]: [] },
                     cart: [],
                     pendingInvoicesByPlace: remainingPending,
                     pendingInvoice: null,
+                    draftInvoicesByPlace: remainingDrafts,
+                    draftInvoice: null,
                 });
             },
 
             // Opens a new, independent sale (legacy: createNewParallelSale) and switches to it.
             createNewSale: () => {
-                const { sales, cartsByPlace, pendingInvoicesByPlace } = get();
+                const { sales, cartsByPlace, pendingInvoicesByPlace, draftInvoicesByPlace } = get();
                 const newPlace = `0-${sales.length}`;
                 set({
                     sales: [...sales, { place: newPlace, time: getCurrentTime() }],
                     cartsByPlace: { ...cartsByPlace, [newPlace]: [] },
                     pendingInvoicesByPlace: { ...pendingInvoicesByPlace, [newPlace]: null },
+                    draftInvoicesByPlace: { ...draftInvoicesByPlace, [newPlace]: null },
                     activePlace: newPlace,
                     cart: [],
                     pendingInvoice: null,
+                    draftInvoice: null,
                 });
                 return newPlace;
             },
@@ -155,7 +209,8 @@ const usePosStore = create(
                     activePlace: place,
                     cart: get().cartsByPlace[place] || [],
                     pendingInvoice: get().pendingInvoicesByPlace[place] || null,
-                });   
+                    draftInvoice: get().draftInvoicesByPlace[place] || null,
+                });
             },
 
             // Re-stamps the main sale's (place '0') displayed start time to now.
@@ -173,7 +228,7 @@ const usePosStore = create(
             // Discards a parallel sale. Legacy only protects place '0' (the main
             // sale) from deletion — any other sale can always be closed.
             deleteSale: (place) => {
-                const { sales, activePlace, cartsByPlace, pendingInvoicesByPlace } = get();
+                const { sales, activePlace, cartsByPlace, pendingInvoicesByPlace, draftInvoicesByPlace } = get();
                 if (place === "0") return false;
 
                 const remainingSales = sales.filter((sale) => sale.place !== place);
@@ -181,6 +236,8 @@ const usePosStore = create(
                 delete remainingCarts[place];
                 const remainingPending = { ...pendingInvoicesByPlace };
                 delete remainingPending[place];
+                const remainingDrafts = { ...draftInvoicesByPlace };
+                delete remainingDrafts[place];
 
                 if (activePlace === place) {
                     const nextPlace = "0";
@@ -188,12 +245,19 @@ const usePosStore = create(
                         sales: remainingSales,
                         cartsByPlace: remainingCarts,
                         pendingInvoicesByPlace: remainingPending,
+                        draftInvoicesByPlace: remainingDrafts,
                         activePlace: nextPlace,
                         cart: remainingCarts[nextPlace] || [],
                         pendingInvoice: remainingPending[nextPlace] || null,
+                        draftInvoice: remainingDrafts[nextPlace] || null,
                     });
                 } else {
-                    set({ sales: remainingSales, cartsByPlace: remainingCarts, pendingInvoicesByPlace: remainingPending });
+                    set({
+                        sales: remainingSales,
+                        cartsByPlace: remainingCarts,
+                        pendingInvoicesByPlace: remainingPending,
+                        draftInvoicesByPlace: remainingDrafts,
+                    });
                 }
                 return true;
             },
@@ -208,11 +272,13 @@ const usePosStore = create(
                 activePlace: state.activePlace,
                 cartsByPlace: state.cartsByPlace,
                 pendingInvoicesByPlace: state.pendingInvoicesByPlace,
+                draftInvoicesByPlace: state.draftInvoicesByPlace,
             }),
             onRehydrateStorage: () => (state) => {
                 if (state) {
                     state.cart = state.cartsByPlace[state.activePlace] || [];
                     state.pendingInvoice = (state.pendingInvoicesByPlace || {})[state.activePlace] || null;
+                    state.draftInvoice = (state.draftInvoicesByPlace || {})[state.activePlace] || null;
                     state.hasHydrated = true;
                 }
             },
