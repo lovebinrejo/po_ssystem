@@ -20,7 +20,7 @@ function DashboardLayout() {
             <div className="flex flex-1 overflow-hidden">
                 <PosSidebar onLogout={logout} />
                 <div
-                    className={`flex-1 min-h-0 soft-scrollbar p-6 bg-white dark:bg-gray-950 ${
+                    className={`flex-1 min-h-0 soft-scrollbar pt-2 pb-2 pl-2 pr-2 bg-white dark:bg-gray-950 ${
                         cashSessionOpen ? "overflow-y-auto" : "overflow-hidden"
                     }`}
                     onWheel={cashSessionOpen ? undefined : (e) => e.preventDefault()}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Search, UserPlus, X } from "lucide-react";
+import { Search, UserPlus, X, ChevronDown, Phone, Mail, IdCard } from "lucide-react";
 import { useCustomers } from "../hooks/useCustomers";
 import useCustomerStore from "../stores/customerStore";
 import useAuthStore from "../../authentication/stores/authStore";
@@ -68,30 +68,34 @@ function CustomerSelector() {
 
     return (
         <div ref={containerRef} className="relative">
-            <div className="relative">
-                <Search size={14} className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-slate-400 pointer-events-none" />
-                <input
-                    type="text"
-                    value={query}
-                    onChange={(e) => {
-                        setQuery(e.target.value);
-                        setOpen(true);
-                    }}
-                    onFocus={() => setOpen(true)}
-                    placeholder="Search Ex: Customer Name, TPIN, Phone, Email"
-                    className="w-full bg-white dark:bg-slate-800 text-gray-900 dark:text-white text-xs sm:text-sm rounded-md sm:rounded-lg pl-8 sm:pl-9 pr-7 sm:pr-8 py-2 sm:py-2.5 border-2 border-gray-300 dark:border-slate-600 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-400/40 placeholder:text-gray-400 dark:placeholder:text-slate-500"
-                />
-                {selectedCustomer && !open && (
-                    <button
-                        type="button"
-                        onClick={handleClear}
-                        aria-label="Clear selected customer"
-                        className="absolute right-2 sm:right-2.5 top-1/2 -translate-y-1/2 text-gray-500 dark:text-slate-400 hover:text-red-500"
-                    >
-                        <X size={14} className="sm:w-4 sm:h-4" />
-                    </button>
-                )}
-            </div>
+            {selectedCustomer && !open ? (
+                <button
+                    type="button"
+                    onClick={() => setOpen(true)}
+                    className="w-full flex items-center justify-between gap-2 bg-white dark:bg-slate-800 text-gray-900 dark:text-white text-xs sm:text-sm rounded-md sm:rounded-lg pl-3 pr-2 py-1 sm:py-1.5 border-2 border-gray-300 dark:border-slate-600 hover:border-gray-400 dark:hover:border-slate-500 transition-colors"
+                >
+                    <span className="truncate">
+                        {selectedCustomer.name} (TPIN: {selectedCustomer.tpin || "—"})
+                    </span>
+                    <ChevronDown size={16} className="shrink-0 text-gray-500 dark:text-slate-400" />
+                </button>
+            ) : (
+                <div className="relative">
+                    <Search size={14} className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-slate-400 pointer-events-none" />
+                    <input
+                        type="text"
+                        value={query}
+                        onChange={(e) => {
+                            setQuery(e.target.value);
+                            setOpen(true);
+                        }}
+                        onFocus={() => setOpen(true)}
+                        placeholder="Search Ex: Customer Name, TPIN, Phone, Email"
+                        autoFocus={open}
+                        className="w-full bg-white dark:bg-slate-800 text-gray-900 dark:text-white text-xs sm:text-sm rounded-md sm:rounded-lg pl-8 sm:pl-9 pr-7 sm:pr-8 py-2 sm:py-2.5 border-2 border-gray-300 dark:border-slate-600 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-400/40 placeholder:text-gray-400 dark:placeholder:text-slate-500"
+                    />
+                </div>
+            )}
 
             {open && (
                 <div className="absolute z-20 mt-1 w-full max-h-72 overflow-y-auto soft-scrollbar rounded-lg border-2 border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl">
@@ -106,6 +110,20 @@ function CustomerSelector() {
                         <UserPlus size={14} />
                         Add New Customer
                     </button>
+
+                    {selectedCustomer && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                handleClear();
+                                setOpen(false);
+                            }}
+                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-red-600 dark:text-red-400 text-xs sm:text-sm font-semibold hover:bg-red-50 dark:hover:bg-red-500/10 border-b border-gray-200 dark:border-slate-700"
+                        >
+                            <X size={14} />
+                            Clear Selected Customer
+                        </button>
+                    )}
 
                     {query.trim().length >= 2 &&
                         (loading ? (
@@ -130,15 +148,34 @@ function CustomerSelector() {
             )}
 
             {selectedCustomer && (
-                <div className="mt-1.5 sm:mt-3 flex items-center gap-1.5 sm:gap-3 bg-gray-50 dark:bg-slate-800/70 rounded-lg sm:rounded-xl p-2 sm:p-3">
-                    <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-full bg-pink-600 text-white flex items-center justify-center text-xs sm:text-base font-semibold shrink-0">
-                        {getInitials(selectedCustomer.name)}
+                <div
+                    style={{ fontFamily: "var(--font-app)" }}
+                    className="mt-1 sm:mt-2 flex items-start gap-1.5 sm:gap-2 bg-white dark:bg-slate-800/70 border border-gray-100 dark:border-slate-700 shadow-sm rounded-lg sm:rounded-xl p-1 sm:p-1.5"
+                >
+                    <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+                        <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-pink-600 text-white flex items-center justify-center text-[10px] sm:text-sm font-semibold shrink-0">
+                            {getInitials(selectedCustomer.name)}
+                        </div>
+                        <div className="min-w-0">
+                            <div className="text-gray-900 dark:text-white text-xs sm:text-sm font-bold truncate leading-tight">{selectedCustomer.name}</div>
+                        </div>
                     </div>
-                    <div className="min-w-0">
-                        <div className="text-gray-900 dark:text-white text-xs sm:text-sm font-semibold truncate">{selectedCustomer.name}</div>
-                        <div className="text-gray-600 dark:text-slate-300 text-[11px] sm:text-xs truncate">TPIN: {selectedCustomer.tpin || "—"}</div>
+                    <div className="min-w-0 max-w-[42%] sm:max-w-[45%] space-y-0.5">
+                        <div className="flex items-center gap-1 min-w-0 text-[#397db9] dark:text-blue-300 text-[10px] sm:text-[11px] font-bold leading-tight">
+                            <IdCard size={10} className="shrink-0" />
+                            <span className="truncate">TPIN: {selectedCustomer.tpin || "—"}</span>
+                        </div>
+                        {selectedCustomer.phone && (
+                            <div className="flex items-center gap-1 min-w-0 text-[#397db9]/90 dark:text-blue-300/80 text-[10px] sm:text-[11px] font-bold leading-tight">
+                                <Phone size={10} className="shrink-0" />
+                                <span className="truncate">{selectedCustomer.phone}</span>
+                            </div>
+                        )}
                         {selectedCustomer.email && (
-                            <div className="hidden sm:block text-gray-500 dark:text-slate-400 text-xs truncate">{selectedCustomer.email}</div>
+                            <div className="flex items-center gap-1 min-w-0 text-[#397db9]/80 dark:text-blue-300/70 text-[10px] sm:text-[11px] font-bold leading-tight">
+                                <Mail size={10} className="shrink-0" />
+                                <span className="truncate">{selectedCustomer.email}</span>
+                            </div>
                         )}
                     </div>
                 </div>

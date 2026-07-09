@@ -1,3 +1,5 @@
+import { handleUnauthorized } from "../../../services/authGuard";
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const ENDPOINT = "/api/pos/cash_control/index.php";
 
@@ -6,12 +8,31 @@ const authHeaders = () => {
     return token ? { "X-API-Key": token } : {};
 };
 
+// Mirrors services/axios.js's fix: fetch() itself throws a raw "Failed to
+// fetch" TypeError when the server is unreachable, before any response
+// exists — convert it to a message a cashier can actually act on instead of
+// letting the literal technical string reach the UI.
+const CONNECTION_ERROR_MESSAGE = "Unable to connect to the server. Please check your network connection and try again.";
+
 const get = async (params) => {
     const query = new URLSearchParams(params).toString();
-    const response = await fetch(`${API_BASE_URL}${ENDPOINT}?${query}`, {
-        headers: authHeaders(),
-    });
-    return response.json();
+    let response;
+    try {
+        response = await fetch(`${API_BASE_URL}${ENDPOINT}?${query}`, {
+            headers: authHeaders(),
+        });
+    } catch {
+        throw new Error(CONNECTION_ERROR_MESSAGE);
+    }
+    if (response.status === 401) {
+        handleUnauthorized();
+        throw new Error("Session expired — please log in again");
+    }
+    try {
+        return await response.json();
+    } catch {
+        throw new Error(CONNECTION_ERROR_MESSAGE);
+    }
 };
 
 // openSession/closeSession read $_POST directly (no JSON body support server-side),
@@ -19,12 +40,25 @@ const get = async (params) => {
 const postForm = async (params) => {
     const query = new URLSearchParams({ action: params.action }).toString();
     const body = new URLSearchParams(params);
-    const response = await fetch(`${API_BASE_URL}${ENDPOINT}?${query}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", ...authHeaders() },
-        body,
-    });
-    return response.json();
+    let response;
+    try {
+        response = await fetch(`${API_BASE_URL}${ENDPOINT}?${query}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded", ...authHeaders() },
+            body,
+        });
+    } catch {
+        throw new Error(CONNECTION_ERROR_MESSAGE);
+    }
+    if (response.status === 401) {
+        handleUnauthorized();
+        throw new Error("Session expired — please log in again");
+    }
+    try {
+        return await response.json();
+    } catch {
+        throw new Error(CONNECTION_ERROR_MESSAGE);
+    }
 };
 
 export const getActiveSession = (terminal) => get({ action: "getActiveSession", terminal });

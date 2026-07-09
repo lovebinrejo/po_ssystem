@@ -9,13 +9,13 @@ const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").
 const fmt = (n) => Number(n ?? 0).toFixed(2);
 
 const ENTRY_HEADERS = [
-    "Date", "Invoice No", "Third Party", "Payment Type", "Amt (Excl)", "VAT",
-    "Amt (Incl)", "Pending", "Change", "Received", "Author", "Status",
+    "Date", "Invoice No", "Third Party", "Amt (Excl)", "VAT",
+    "Amt (Incl)", "Pending", "Received", "Currency", "Status",
 ];
 
 const entryToRow = (e) => [
-    e.date, e.ref, e.customer, e.payment_type, Number(e.total_ht), Number(e.total_tva),
-    Number(e.total_ttc), Number(e.pending), Number(e.change), Number(e.received), e.author, e.status,
+    e.date, e.ref, e.customer, Number(e.total_ht), Number(e.total_tva),
+    Number(e.total_ttc), Number(e.pending), Number(e.received), e.currency, e.status,
 ];
 
 const exportFilename = (start, end, ext) => `pos-report-${start}_to_${end}.${ext}`;
@@ -33,7 +33,7 @@ const styleHeaderRow = (row) => {
     });
 };
 
-const buildReportWorkbook = async ({ entries, payments, total, totals, startIso, endIso, terminal, searchTerm }) => {
+const buildReportWorkbook = async ({ entries, totals, startIso, endIso, terminal, searchTerm }) => {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = COMPANY_NAME;
     const sheet = workbook.addWorksheet("POS Report");
@@ -66,23 +66,13 @@ const buildReportWorkbook = async ({ entries, payments, total, totals, startIso,
     sheet.addRow([`Exported: ${new Date().toLocaleString()}`]).font = greyItalic;
     sheet.addRow([]);
 
-    sheet.addRow(["Payment Summary"]).font = { bold: true, size: 12 };
-    styleHeaderRow(sheet.addRow(["Method", "Amount", "Count", "% of Total"]));
-    payments.forEach((p) => {
-        const pct = total > 0 ? ((p.amount / total) * 100).toFixed(1) : "0.0";
-        sheet.addRow([p.label, Number(p.amount), p.count, `${pct}%`]);
-    });
-    const totalRow = sheet.addRow(["Total", Number(total), payments.reduce((sum, p) => sum + p.count, 0), "100%"]);
-    totalRow.font = { bold: true };
-    sheet.addRow([]);
-
     sheet.addRow(["Invoices"]).font = { bold: true, size: 12 };
     styleHeaderRow(sheet.addRow(ENTRY_HEADERS));
     entries.forEach((e) => sheet.addRow(entryToRow(e)));
     if (totals) {
         const grandTotalRow = sheet.addRow([
-            "", "", "", "Total", Number(totals.total_ht), Number(totals.total_tva),
-            Number(totals.total_ttc), Number(totals.pending), Number(totals.change), Number(totals.received), "", "",
+            "", "", "Total", Number(totals.total_ht), Number(totals.total_tva),
+            Number(totals.total_ttc), Number(totals.pending), Number(totals.received), "", "",
         ]);
         grandTotalRow.font = { bold: true };
     }
@@ -94,8 +84,8 @@ const buildReportWorkbook = async ({ entries, payments, total, totals, startIso,
     return workbook;
 };
 
-export const exportReportExcel = async ({ entries, payments, total, totals, startIso, endIso, terminal, searchTerm }) => {
-    const workbook = await buildReportWorkbook({ entries, payments, total, totals, startIso, endIso, terminal, searchTerm });
+export const exportReportExcel = async ({ entries, totals, startIso, endIso, terminal, searchTerm }) => {
+    const workbook = await buildReportWorkbook({ entries, totals, startIso, endIso, terminal, searchTerm });
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const url = URL.createObjectURL(blob);
@@ -113,12 +103,6 @@ const PDF_STYLES = `
     .header h1 { margin: 0; font-size: 18px; }
     .header .period { font-size: 12px; opacity: 0.85; margin-top: 2px; }
     h2 { font-size: 13px; margin: 18px 0 8px; }
-    .summary { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
-    .card { flex: 1; min-width: 140px; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 10px; }
-    .card .label { font-size: 10px; color: #6b7280; }
-    .card .amount { font-size: 13px; font-weight: 700; }
-    .card.total { background: #2c6291; color: white; border-color: #2c6291; }
-    .card.total .label { color: #dbeafe; }
     .totals-strip { display: flex; gap: 16px; text-align: center; margin: 14px 0; }
     .totals-strip div { flex: 1; }
     .totals-strip .label { font-size: 10px; color: #6b7280; }
@@ -132,27 +116,15 @@ const PDF_STYLES = `
     @media print { .header { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 `;
 
-export const buildReportPdfHtml = ({ entries, payments, total, totals, startIso, endIso, terminal, searchTerm }) => {
-    const summaryCardsHtml = payments
-        .map((p) => {
-            const pct = total > 0 ? ((p.amount / total) * 100).toFixed(1) : "0.0";
-            return `
-                <div class="card">
-                    <div class="label">${esc(p.label)} &bull; ${p.count}&times; &bull; ${pct}%</div>
-                    <div class="amount">ZMW ${fmt(p.amount)}</div>
-                </div>
-            `;
-        })
-        .join("");
-
+export const buildReportPdfHtml = ({ entries, totals, startIso, endIso, terminal, searchTerm }) => {
     const rowsHtml = entries
         .map(
             (e) => `<tr>
-                <td>${esc(e.date)}</td><td>${esc(e.ref)}</td><td>${esc(e.customer)}</td><td>${esc(e.payment_type)}</td>
+                <td>${esc(e.date)}</td><td>${esc(e.ref)}</td><td>${esc(e.customer)}</td>
                 <td class="num">${fmt(e.total_ht)}</td><td class="num">${fmt(e.total_tva)}</td>
                 <td class="num">${fmt(e.total_ttc)}</td><td class="num">${fmt(e.pending)}</td>
-                <td class="num">${fmt(e.change)}</td><td class="num">${fmt(e.received)}</td>
-                <td>${esc(e.author)}</td><td>${esc(e.status)}</td>
+                <td class="num">${fmt(e.received)}</td>
+                <td>${esc(e.currency)}</td><td>${esc(e.status)}</td>
             </tr>`
         )
         .join("");
@@ -172,15 +144,6 @@ export const buildReportPdfHtml = ({ entries, payments, total, totals, startIso,
                     </div>
                 </div>
 
-                <h2>Payment Summary</h2>
-                <div class="summary">
-                    ${summaryCardsHtml}
-                    <div class="card total">
-                        <div class="label">Total &bull; ${payments.reduce((sum, p) => sum + p.count, 0)}&times;</div>
-                        <div class="amount">ZMW ${fmt(total)}</div>
-                    </div>
-                </div>
-
                 ${
                     totals
                         ? `<div class="totals-strip">
@@ -197,16 +160,15 @@ export const buildReportPdfHtml = ({ entries, payments, total, totals, startIso,
                     <thead>
                         <tr>${ENTRY_HEADERS.map((h) => `<th>${h}</th>`).join("")}</tr>
                     </thead>
-                    <tbody>${rowsHtml || `<tr><td colspan="12" style="text-align:center;color:#9ca3af;">No entries</td></tr>`}</tbody>
+                    <tbody>${rowsHtml || `<tr><td colspan="10" style="text-align:center;color:#9ca3af;">No entries</td></tr>`}</tbody>
                     ${
                         totals
                             ? `<tfoot><tr>
-                                <td colspan="4">Total</td>
+                                <td colspan="3">Total</td>
                                 <td class="num">${fmt(totals.total_ht)}</td>
                                 <td class="num">${fmt(totals.total_tva)}</td>
                                 <td class="num">${fmt(totals.total_ttc)}</td>
                                 <td class="num">${fmt(totals.pending)}</td>
-                                <td class="num">${fmt(totals.change)}</td>
                                 <td class="num">${fmt(totals.received)}</td>
                                 <td colspan="2"></td>
                                </tr></tfoot>`
@@ -220,10 +182,10 @@ export const buildReportPdfHtml = ({ entries, payments, total, totals, startIso,
     `;
 };
 
-export const exportReportPDF = ({ entries, payments, total, totals, startIso, endIso, terminal, searchTerm }) => {
+export const exportReportPDF = ({ entries, totals, startIso, endIso, terminal, searchTerm }) => {
     const printWindow = window.open("", "_blank", "width=1000,height=700");
     if (!printWindow) return false;
-    printWindow.document.write(buildReportPdfHtml({ entries, payments, total, totals, startIso, endIso, terminal, searchTerm }));
+    printWindow.document.write(buildReportPdfHtml({ entries, totals, startIso, endIso, terminal, searchTerm }));
     printWindow.document.close();
     printWindow.focus();
     printWindow.print();

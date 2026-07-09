@@ -61,7 +61,7 @@ function PosNavbar({ onToggleSidebar, onOpenCart }) {
                     type="button"
                     onClick={createNewSale}
                     title="Start a new parallel sale"
-                    className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-slate-700 text-white text-sm font-medium hover:bg-slate-600"
+                    className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-[#397db9] text-white text-sm font-semibold hover:bg-[#2c6291]"
                 >
                     <ShoppingCart size={14} />
                     New Sale

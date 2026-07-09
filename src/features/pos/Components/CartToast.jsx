@@ -1,10 +1,11 @@
-import { CheckCircle2, AlertTriangle, RefreshCw } from "lucide-react";
+import { CheckCircle2, AlertTriangle, RefreshCw, XCircle } from "lucide-react";
 import usePosStore from "../stores/posStore";
 
 const VARIANTS = {
     success: { icon: CheckCircle2, className: "bg-emerald-500 shadow-emerald-500/30" },
     warning: { icon: AlertTriangle, className: "bg-amber-500 shadow-amber-500/30" },
     info: { icon: RefreshCw, className: "bg-blue-500 shadow-blue-500/30" },
+    error: { icon: XCircle, className: "bg-red-500 shadow-red-500/30" },
 };
 
 function CartToast() {

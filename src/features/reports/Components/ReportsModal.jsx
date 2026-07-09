@@ -5,12 +5,6 @@ import {
     X,
     Filter,
     Search,
-    Banknote,
-    CreditCard,
-    Landmark,
-    Smartphone,
-    FileText,
-    HelpCircle,
     Printer,
     ChevronLeft,
     ChevronRight,
@@ -23,33 +17,11 @@ import {
 } from "lucide-react";
 import useAuthStore from "../../authentication/stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
-import { getPaymentSummary, getReportsData } from "../services/reportsApi";
+import { getInvoicesInRange } from "../services/reportsApi";
 import { fetchReceipt } from "../services/receiptApi";
 import { printReceipt } from "./InvoiceReceipt";
 import { exportReportExcel, exportReportPDF } from "./ReportExport";
 import DateRangePicker from "./DateRangePicker";
-
-const ICONS = { cash: Banknote, credit: CreditCard, bank: Landmark, mobile: Smartphone, cheque: FileText, other: HelpCircle };
-// Distinct accent color per payment method so cards are scannable at a glance,
-// instead of every icon/badge being the same generic blue.
-const ACCENTS = {
-    cash: "bg-emerald-600",
-    credit: "bg-indigo-600",
-    bank: "bg-sky-600",
-    mobile: "bg-violet-600",
-    cheque: "bg-amber-600",
-    other: "bg-slate-600",
-};
-// Soft/tinted variant of ACCENTS for the low-emphasis "count" badge (solid ACCENTS
-// color is reserved for the higher-emphasis percent badge).
-const SOFT_ACCENTS = {
-    cash: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-    credit: "bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
-    bank: "bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400",
-    mobile: "bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400",
-    cheque: "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400",
-    other: "bg-slate-100 dark:bg-slate-500/10 text-slate-600 dark:text-slate-400",
-};
 
 const today = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
 const toIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -60,6 +32,16 @@ const toIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, 
 const parseDisplayDate = (str) => {
     const [m, d, y] = str.split("/").map(Number);
     return new Date(y, m - 1, d).getTime();
+};
+
+// api/invoices/index.php returns `date` as a raw MySQL datetime string
+// ("YYYY-MM-DD HH:MM:SS"), not pre-formatted like the old api/pos/reports
+// endpoint was — reformat to the same "MM/DD/YYYY" display/sort convention
+// the rest of this table already uses.
+const formatInvoiceDate = (raw) => {
+    if (!raw) return "";
+    const [y, m, d] = raw.split(" ")[0].split("-").map(Number);
+    return `${m}/${d}/${y}`;
 };
 
 const compareEntries = (a, b, field, dir) => {
@@ -82,20 +64,50 @@ const reportsQueryKey = (terminal, filters) => [
     filters.search,
 ];
 
-const fetchReports = async (terminal, filters) => {
-    const [summaryRes, reportsRes] = await Promise.all([
-        getPaymentSummary({ terminal }),
-        getReportsData({ terminal, startDate: toIso(filters.start), endDate: toIso(filters.end), search: filters.search }),
-    ]);
-    if (!summaryRes.success) throw new Error(summaryRes.error || "Failed to load payment summary");
-    if (!reportsRes.success) throw new Error(reportsRes.error || "Failed to load reports data");
-
+// Maps api/invoices/index.php's generic invoice shape onto what this table
+// needs. Note two real gaps vs. the old (undeployed) api/pos/reports
+// endpoint: this isn't scoped to POS/this terminal (it's every invoice in the
+// entity), and payment_type/change aren't in the list response (only via a
+// per-invoice detail call, intentionally skipped here for speed) — see
+// [[pos_standalone_auth_session_guard]] sibling note in reportsApi.js.
+const mapInvoiceToEntry = (inv) => {
+    const paye = inv.paye === 1;
+    const totalPaid = paye && inv.sumpayed === 0 ? inv.total_ttc : inv.sumpayed;
+    const pending = Math.max(0, inv.total_ttc - totalPaid);
     return {
-        payments: summaryRes.payments,
-        total: summaryRes.total,
-        entries: reportsRes.entries,
-        totals: reportsRes.totals,
+        id: inv.id,
+        ref: inv.ref,
+        date: formatInvoiceDate(inv.date),
+        customer: inv.socname || inv.thirdparty_name || "-",
+        total_ht: inv.total_ht,
+        total_tva: inv.total_tva,
+        total_ttc: inv.total_ttc,
+        pending,
+        received: totalPaid,
+        currency: inv.currency || inv.multicurrency_code || "ZMW",
+        status: inv.status_label,
     };
+};
+
+const fetchReports = async (terminal, filters) => {
+    const invoices = await getInvoicesInRange({ startDate: toIso(filters.start), endDate: toIso(filters.end) });
+    const term = filters.search.trim().toLowerCase();
+    const entries = invoices
+        .map(mapInvoiceToEntry)
+        .filter((e) => !term || e.ref?.toLowerCase().includes(term) || e.customer?.toLowerCase().includes(term));
+
+    const totals = entries.reduce(
+        (acc, e) => ({
+            total_ht: acc.total_ht + e.total_ht,
+            total_tva: acc.total_tva + e.total_tva,
+            total_ttc: acc.total_ttc + e.total_ttc,
+            pending: acc.pending + e.pending,
+            received: acc.received + e.received,
+        }),
+        { total_ht: 0, total_tva: 0, total_ttc: 0, pending: 0, received: 0 }
+    );
+
+    return { entries, totals };
 };
 
 function ReportsModal({ open, onClose }) {
@@ -143,8 +155,6 @@ function ReportsModal({ open, onClose }) {
         placeholderData: keepPreviousData,
     });
 
-    const payments = data?.payments ?? [];
-    const total = data?.total ?? 0;
     const entries = data?.entries ?? [];
     const totals = data?.totals ?? null;
 
@@ -174,7 +184,7 @@ function ReportsModal({ open, onClose }) {
         .filter((e) => {
             if (!tableSearch) return true;
             const term = tableSearch.toLowerCase();
-            return [e.ref, e.customer, e.payment_type, e.author, e.status].some((field) =>
+            return [e.ref, e.customer, e.status].some((field) =>
                 field?.toLowerCase().includes(term)
             );
         })
@@ -196,10 +206,9 @@ function ReportsModal({ open, onClose }) {
             total_tva: acc.total_tva + e.total_tva,
             total_ttc: acc.total_ttc + e.total_ttc,
             pending: acc.pending + e.pending,
-            change: acc.change + e.change,
             received: acc.received + e.received,
         }),
-        { total_ht: 0, total_tva: 0, total_ttc: 0, pending: 0, change: 0, received: 0 }
+        { total_ht: 0, total_tva: 0, total_ttc: 0, pending: 0, received: 0 }
     );
 
     // Re-clamp the current page whenever the page size or filtered result count changes
@@ -248,8 +257,6 @@ function ReportsModal({ open, onClose }) {
         try {
             await exportReportExcel({
                 entries: filteredEntries,
-                payments,
-                total,
                 totals,
                 startIso: toIso(filters.start),
                 endIso: toIso(filters.end),
@@ -266,8 +273,6 @@ function ReportsModal({ open, onClose }) {
     const handleExportPDF = () => {
         exportReportPDF({
             entries: filteredEntries,
-            payments,
-            total,
             totals,
             startIso: toIso(filters.start),
             endIso: toIso(filters.end),
@@ -375,7 +380,7 @@ function ReportsModal({ open, onClose }) {
                             type="button"
                             onClick={handleApplyFilter}
                             disabled={isFetching}
-                            className="flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-70 disabled:cursor-wait"
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold text-white bg-[#397db9] hover:bg-[#2c6291] disabled:opacity-70 disabled:cursor-wait"
                         >
                             {isFetching ? <Loader2 size={14} className="animate-spin" /> : <Filter size={14} />}
                             {isFetching ? "Applying..." : "Apply Filter"}
@@ -398,50 +403,9 @@ function ReportsModal({ open, onClose }) {
                         <ReportsSkeleton />
                     ) : (
                         <div className={`flex-1 min-h-0 flex flex-col gap-3 transition-opacity ${isFetching ? "opacity-50" : ""}`}>
-                            {/* Payment summary cards */}
-                            <div className="shrink-0">
-                                <h3 className="flex items-center gap-1.5 text-sm font-semibold mb-1.5">
-                                    <BarChart3 size={15} className="text-blue-500" />
-                                    Payment Summary
-                                </h3>
-                                <div className="flex flex-wrap gap-3">
-                                    {payments.map((p) => {
-                                        const Icon = ICONS[p.icon] || HelpCircle;
-                                        const accent = ACCENTS[p.icon] || "bg-slate-600";
-                                        const soft = SOFT_ACCENTS[p.icon] || SOFT_ACCENTS.other;
-                                        const pct = total > 0 ? ((p.amount / total) * 100).toFixed(1) : "0.0";
-                                        return (
-                                            <div
-                                                key={p.code || p.label}
-                                                className="flex-1 min-w-[170px] flex flex-col rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 shadow-sm hover:shadow-md transition-all overflow-hidden"
-                                            >
-                                                <div className="flex items-center gap-2 px-3 py-2">
-                                                    <div className={`w-8 h-8 shrink-0 rounded-xl ${accent} text-white flex items-center justify-center`}>
-                                                        <Icon size={15} />
-                                                    </div>
-                                                    <span className="flex-1 min-w-0 text-[13px] font-semibold text-gray-800 dark:text-slate-100 whitespace-nowrap truncate">
-                                                        {p.label}
-                                                    </span>
-                                                    <span className={`shrink-0 text-[10px] font-bold rounded-full px-2 py-1 whitespace-nowrap ${soft}`}>
-                                                        {p.count}×
-                                                    </span>
-                                                </div>
-                                                <div className="h-px bg-gray-100 dark:bg-slate-700" />
-                                                <div className="flex items-center justify-between gap-2 px-3 py-2">
-                                                    <span className="text-[15px] font-extrabold text-gray-900 dark:text-white whitespace-nowrap truncate">
-                                                        ZMW {p.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                                    </span>
-                                                    <span className={`shrink-0 text-xs font-bold text-white rounded-full px-2.5 py-1 whitespace-nowrap ${accent}`}>
-                                                        {pct}%
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-
-                            {/* Totals summary card + Total card, together on their own row below the payment method cards */}
+                            {/* Totals summary row. No Payment Summary (cash/card/mobile breakdown) here —
+                                that needs each invoice's payment method, which api/invoices/index.php's
+                                list response doesn't include (see reportsApi.js). */}
                             {totals && (
                                 <div className="shrink-0 flex flex-wrap gap-3">
                                     <div className="flex-1 min-w-[150px] flex flex-col justify-center leading-tight rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 shadow-sm px-4 py-1">
@@ -468,13 +432,13 @@ function ReportsModal({ open, onClose }) {
                                             <span className="flex-1 min-w-0 text-base font-semibold whitespace-nowrap truncate">Total</span>
                                             <div className="w-px h-5 shrink-0 bg-white/20" />
                                             <span className="shrink-0 text-xs font-bold rounded-full bg-white/20 px-2.5 py-1 whitespace-nowrap">
-                                                {payments.reduce((sum, p) => sum + p.count, 0)}×
+                                                {entries.length}×
                                             </span>
                                         </div>
                                         <div className="h-px bg-white/20" />
                                         <div className="flex items-center gap-2.5 px-4 py-1">
                                             <span className="flex-1 min-w-0 text-xl font-extrabold whitespace-nowrap truncate">
-                                                ZMW {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                                ZMW {totals.total_ttc.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                             </span>
                                             <div className="w-px h-5 shrink-0 bg-white/20" />
                                             <span className="shrink-0 text-sm font-bold rounded-full bg-white/20 px-3 py-1 whitespace-nowrap">100%</span>
@@ -518,14 +482,11 @@ function ReportsModal({ open, onClose }) {
                                                 <SortableHeader label="Date" field="date" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <SortableHeader label="Invoice No" field="ref" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <SortableHeader label="Third Party" field="customer" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
-                                                <SortableHeader label="Payment Type" field="payment_type" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <SortableHeader label="Amount (Excl. Tax)" field="total_ht" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
                                                 <SortableHeader label="VAT" field="total_tva" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
                                                 <SortableHeader label="Amount (Inc. Tax)" field="total_ttc" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
                                                 <SortableHeader label="Pending" field="pending" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
-                                                <SortableHeader label="Change" field="change" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
                                                 <SortableHeader label="Received" field="received" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
-                                                <SortableHeader label="Author" field="author" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <SortableHeader label="Currency" field="currency" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <SortableHeader label="Status" field="status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <th className="text-center px-2.5 py-1 text-xs whitespace-nowrap bg-gray-50 dark:bg-slate-800">Actions</th>
@@ -534,7 +495,7 @@ function ReportsModal({ open, onClose }) {
                                         <tbody>
                                             {visibleEntries.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan={14} className="text-center py-6 text-gray-400 dark:text-slate-500">
+                                                    <td colSpan={11} className="text-center py-6 text-gray-400 dark:text-slate-500">
                                                         No entries found
                                                     </td>
                                                 </tr>
@@ -551,18 +512,13 @@ function ReportsModal({ open, onClose }) {
                                                         <td className="px-2.5 py-1 whitespace-nowrap">{entry.date}</td>
                                                         <td className="px-2.5 py-1 font-semibold whitespace-nowrap">{entry.ref}</td>
                                                         <td className="px-2.5 py-1 max-w-[90px] truncate">{entry.customer}</td>
-                                                        <td className="px-2.5 py-1 max-w-[85px] truncate">{entry.payment_type}</td>
                                                         <td className="px-2.5 py-1 text-right">{entry.total_ht.toFixed(2)}</td>
                                                         <td className="px-2.5 py-1 text-right">{entry.total_tva.toFixed(2)}</td>
                                                         <td className="px-2.5 py-1 text-right font-semibold">{entry.total_ttc.toFixed(2)}</td>
                                                         <td className={`px-2.5 py-1 text-right ${entry.pending > 0 ? "text-amber-500 font-semibold" : ""}`}>
                                                             {entry.pending.toFixed(2)}
                                                         </td>
-                                                        <td className={`px-2.5 py-1 text-right ${entry.change > 0 ? "text-emerald-600 font-semibold" : ""}`}>
-                                                            {entry.change.toFixed(2)}
-                                                        </td>
                                                         <td className="px-2.5 py-1 text-right">{entry.received.toFixed(2)}</td>
-                                                        <td className="px-2.5 py-1 whitespace-nowrap">{entry.author}</td>
                                                         <td className="px-2.5 py-1 whitespace-nowrap">{entry.currency}</td>
                                                         <td className="px-2.5 py-1 whitespace-nowrap">{entry.status}</td>
                                                         <td className="px-2.5 py-1 text-center">
@@ -590,16 +546,15 @@ function ReportsModal({ open, onClose }) {
                                         {totals && filteredEntries.length > 0 && (
                                             <tfoot className="sticky bottom-0 z-10 bg-gray-50 dark:bg-slate-800 font-semibold shadow-[0_-1px_0_0_rgba(0,0,0,0.1)]">
                                                 <tr>
-                                                    <td colSpan={4} className="text-right px-2.5 py-1">
+                                                    <td colSpan={3} className="text-right px-2.5 py-1">
                                                         Total
                                                     </td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.total_ht.toFixed(2)}</td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.total_tva.toFixed(2)}</td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.total_ttc.toFixed(2)}</td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.pending.toFixed(2)}</td>
-                                                    <td className="text-right px-2.5 py-1 text-emerald-600">{displayTotals.change.toFixed(2)}</td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.received.toFixed(2)}</td>
-                                                    <td colSpan={4}></td>
+                                                    <td colSpan={3}></td>
                                                 </tr>
                                             </tfoot>
                                         )}
@@ -625,7 +580,7 @@ function ReportsModal({ open, onClose }) {
                                             >
                                                 <ChevronLeft size={12} />
                                             </button>
-                                            <span className="w-7 h-6 flex items-center justify-center rounded bg-blue-600 text-white font-semibold">
+                                            <span className="w-7 h-6 flex items-center justify-center rounded bg-[#2c6291] text-white font-semibold">
                                                 {safePage}
                                             </span>
                                             <button
@@ -653,7 +608,7 @@ function ReportsModal({ open, onClose }) {
                     <button
                         type="button"
                         onClick={onClose}
-                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold border border-gray-300 dark:border-slate-600 text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 hover:border-gray-400 dark:hover:border-slate-500 cursor-pointer transition-colors"
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold border border-gray-300 dark:border-slate-600 text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 hover:border-gray-400 dark:hover:border-slate-500 cursor-pointer transition-colors"
                     >
                         <X size={14} />
                         Close
@@ -662,7 +617,7 @@ function ReportsModal({ open, onClose }) {
                         type="button"
                         onClick={handleExportExcel}
                         disabled={showSkeleton || exportingExcel}
-                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-md shadow-emerald-500/30 hover:from-emerald-600 hover:to-emerald-700 hover:shadow-lg hover:shadow-emerald-500/40 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:shadow-none"
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-md shadow-emerald-500/30 hover:from-emerald-600 hover:to-emerald-700 hover:shadow-lg hover:shadow-emerald-500/40 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:shadow-none"
                     >
                         {exportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
                         Export Excel
@@ -671,7 +626,7 @@ function ReportsModal({ open, onClose }) {
                         type="button"
                         onClick={handleExportPDF}
                         disabled={showSkeleton}
-                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold text-white bg-gradient-to-b from-red-500 to-red-600 shadow-md shadow-red-500/30 hover:from-red-600 hover:to-red-700 hover:shadow-lg hover:shadow-red-500/40 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:shadow-none"
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-gradient-to-b from-red-500 to-red-600 shadow-md shadow-red-500/30 hover:from-red-600 hover:to-red-700 hover:shadow-lg hover:shadow-red-500/40 hover:-translate-y-0.5 active:translate-y-0 cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:translate-y-0 disabled:shadow-none"
                     >
                         <FileDown size={14} />
                         Export PDF

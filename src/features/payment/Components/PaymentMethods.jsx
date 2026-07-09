@@ -31,7 +31,7 @@ function PaymentMethods({ selected, onSelect }) {
                         onClick={() => onSelect(code)}
                         className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 py-3 text-xs font-semibold transition-all ${
                             selected === code
-                                ? "border-[#397db9] bg-gradient-to-br from-[#397db9] to-[#2c6a9e] text-white shadow-md"
+                                ? "border-[#2c6291] bg-[#2c6291] text-white shadow-md"
                                 : "border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-300 hover:border-[#397db9]/50 hover:shadow-sm"
                         }`}
                     >

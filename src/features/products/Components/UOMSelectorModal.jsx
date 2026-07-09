@@ -110,7 +110,7 @@ function UOMSelectorModal({ product, onClose, onConfirm }) {
                     <button
                         type="button"
                         onClick={onClose}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700"
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-gray-700 dark:text-slate-200 bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-600"
                     >
                         <X size={15} />
                         Cancel

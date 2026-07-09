@@ -3,7 +3,7 @@ import { AlertTriangle } from "lucide-react";
 function ConfirmDialog({ open, title, message, confirmLabel = "OK", cancelLabel = "Cancel", variant = "danger", onConfirm, onCancel }) {
     if (!open) return null;
 
-    const confirmClasses = variant === "danger" ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700";
+    const confirmClasses = variant === "danger" ? "bg-red-600 hover:bg-red-700" : "bg-[#397db9] hover:bg-[#2c6291]";
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={onCancel}>
@@ -25,14 +25,14 @@ function ConfirmDialog({ open, title, message, confirmLabel = "OK", cancelLabel 
                     <button
                         type="button"
                         onClick={onCancel}
-                        className="px-4 py-1.5 rounded-full text-sm font-semibold border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-800"
+                        className="px-4 py-2 rounded-full text-sm font-semibold border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-800"
                     >
                         {cancelLabel}
                     </button>
                     <button
                         type="button"
                         onClick={onConfirm}
-                        className={`px-4 py-1.5 rounded-full text-sm font-semibold text-white ${confirmClasses}`}
+                        className={`px-4 py-2 rounded-full text-sm font-semibold text-white ${confirmClasses}`}
                     >
                         {confirmLabel}
                     </button>

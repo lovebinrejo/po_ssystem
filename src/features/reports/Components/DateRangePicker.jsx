@@ -81,7 +81,7 @@ function MonthGrid({ year, month, draftStart, draftEnd, onPick }) {
                                                 : "text-gray-700 dark:text-slate-200"
                                         } ${
                                             isStart || isEnd
-                                                ? "bg-blue-600 text-white font-semibold"
+                                                ? "bg-[#2c6291] text-white font-semibold"
                                                 : inRange
                                                 ? "bg-blue-100 dark:bg-blue-500/20"
                                                 : "hover:bg-gray-100 dark:hover:bg-slate-700"
@@ -183,7 +183,7 @@ function DateRangePicker({ startDate, endDate, onApply }) {
                                 onClick={() => handlePreset(p)}
                                 className={`block w-full text-left text-xs px-3 py-2 ${
                                     activePreset === p.label
-                                        ? "bg-blue-600 text-white"
+                                        ? "bg-[#2c6291] text-white"
                                         : "text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-800"
                                 }`}
                             >
@@ -195,7 +195,7 @@ function DateRangePicker({ startDate, endDate, onApply }) {
                             onClick={() => setActivePreset("Custom Range")}
                             className={`block w-full text-left text-xs px-3 py-2 ${
                                 activePreset === "Custom Range"
-                                    ? "bg-blue-600 text-white"
+                                    ? "bg-[#2c6291] text-white"
                                     : "text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-800"
                             }`}
                         >

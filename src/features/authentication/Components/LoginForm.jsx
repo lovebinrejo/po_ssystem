@@ -47,7 +47,7 @@ function LoginForm({
                 text="LOGIN"
                 onclick={onLogin}
                 type="button"
-                className="mt-6 w-full py-3 rounded-full tracking-widest bg-[#397db9]! hover:bg-[#2c6291]!"
+                className="mt-6 w-full py-3 rounded-full tracking-widest"
             />
         </div>
     );

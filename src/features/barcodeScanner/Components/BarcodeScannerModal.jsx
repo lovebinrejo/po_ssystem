@@ -113,7 +113,7 @@ function BarcodeScannerModal({ open, onClose, onScan }) {
                             />
                             <button
                                 type="submit"
-                                className="px-4 py-2 rounded-lg bg-[#397db9] text-white text-sm font-medium hover:bg-[#2c6291]"
+                                className="px-4 py-2 rounded-lg bg-[#397db9] text-white text-sm font-semibold hover:bg-[#2c6291]"
                             >
                                 Search
                             </button>
@@ -125,7 +125,7 @@ function BarcodeScannerModal({ open, onClose, onScan }) {
                     <button
                         type="button"
                         onClick={() => setFacingMode((m) => (m === "environment" ? "user" : "environment"))}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-gray-100 hover:bg-gray-200 text-gray-700"
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700"
                     >
                         <RefreshCw size={14} />
                         Switch Camera
@@ -133,7 +133,7 @@ function BarcodeScannerModal({ open, onClose, onScan }) {
                     <button
                         type="button"
                         onClick={onClose}
-                        className="px-3 py-2 rounded-lg text-sm bg-gray-100 hover:bg-gray-200 text-gray-700"
+                        className="px-4 py-2 rounded-lg text-sm font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700"
                     >
                         Cancel
                     </button>

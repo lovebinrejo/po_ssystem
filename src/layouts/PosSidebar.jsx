@@ -127,17 +127,26 @@ function PosSidebar({ onLogout }) {
     // (after a short delay) instead of waiting for a manual click.
     useEffect(() => {
         let cancelled = false;
-        getActiveSession(terminalNumber).then((res) => {
-            if (cancelled) return;
-            if (res.success) {
-                setCashSessionOpen(!!res.session);
-                if (!res.session) {
-                    setTimeout(() => {
-                        if (!cancelled) setCashDeskOpen(true);
-                    }, 1000);
+        getActiveSession(terminalNumber)
+            .then((res) => {
+                if (cancelled) return;
+                if (res.success) {
+                    setCashSessionOpen(!!res.session);
+                    if (!res.session) {
+                        setTimeout(() => {
+                            if (!cancelled) setCashDeskOpen(true);
+                        }, 1000);
+                    }
                 }
-            }
-        });
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                // Left uncaught, this silently leaves cashSessionOpen at its
+                // optimistic default (true) forever, so the POS looks fully
+                // operational even though nothing can actually reach the
+                // server — surface it instead of failing silently.
+                showToast(err.message || "Unable to reach the server", "error");
+            });
         return () => {
             cancelled = true;
         };

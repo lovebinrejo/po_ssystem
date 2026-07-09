@@ -85,7 +85,7 @@ function PosHome() {
     const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
 
     return (
-        <div className="flex flex-row gap-2 sm:gap-4 lg:gap-6 h-full min-h-0">
+        <div className="flex flex-row gap-1 h-full min-h-0">
             <div ref={gridWrapperRef} className="relative flex-1 min-w-0 flex flex-col min-h-0">
                 <div className="shrink-0 pb-2 sm:pb-3">
                     <CategoryTabs
