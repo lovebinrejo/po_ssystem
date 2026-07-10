@@ -1,0 +1,12 @@
+# SPA fallback for the /pos-app/ subpath — only takes effect when this build
+# is copied into the Dolibarr docroot (htdocs/pos-app/). Without this, a
+# direct navigation or refresh on a client-side route (e.g. /pos-app/pos)
+# 404s instead of serving index.html and letting React Router take over.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /ecuenta9/htdocs/pos-app/
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /ecuenta9/htdocs/pos-app/index.html [L]
+</IfModule>

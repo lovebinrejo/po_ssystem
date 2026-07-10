@@ -1,4 +1,4 @@
-import { User, KeyRound, Building2 } from "lucide-react";
+import { User, KeyRound, Building2, Globe } from "lucide-react";
 import Input from "../../../components/inputs/Input";
 import EntitySelect from "../../../components/inputs/EntitySelect";
 import Button from "../../../components/Buttons/Button";
@@ -9,9 +9,11 @@ function LoginForm({
     email,
     password,
     masterEntity,
+    backendUrl,
     setEmail,
     setPassword,
     setMasterEntity,
+    setBackendUrl,
     onLogin
 }) {
     return (
@@ -42,6 +44,19 @@ function LoginForm({
                     icon={<Building2 size={18} />}
                     className="bg-white border border-gray-300 rounded-full"
                 />
+                <div>
+                    <Input
+                        name="backendUrl"
+                        placeholder="e.g. https://demo1.ecuenta.online"
+                        value={backendUrl}
+                        onchange={(e) => setBackendUrl(e.target.value)}
+                        icon={<Globe size={18} />}
+                        className="bg-[#eef3f8] rounded-full"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1 ml-3">
+                        Backend URL (optional) — a plain base URL works, or paste any legacy POS/API page URL and it's extracted automatically.
+                    </p>
+                </div>
             </div>
             <Button
                 text="LOGIN"

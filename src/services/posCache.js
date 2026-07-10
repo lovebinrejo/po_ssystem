@@ -95,6 +95,25 @@ export const initCache = () => {
 
 export const isCacheReady = () => ready;
 
+// Drops the cached products/customers/categories and forces the next
+// initCache() call to fetch fresh, regardless of the 24h TTL. Used when the
+// active backend URL changes (see Login.jsx) — a cache built from one
+// Dolibarr instance is meaningless (or actively wrong) once pointed at a
+// different one.
+export const clearCache = () => {
+    cache = { products: [], customers: [], categories: [] };
+    ready = false;
+    initPromise = null;
+    try {
+        localStorage.removeItem(STORAGE_KEYS.PRODUCTS);
+        localStorage.removeItem(STORAGE_KEYS.CUSTOMERS);
+        localStorage.removeItem(STORAGE_KEYS.CATEGORIES);
+        localStorage.removeItem(STORAGE_KEYS.META);
+    } catch {
+        // localStorage unavailable — the in-memory reset above still applies.
+    }
+};
+
 export const searchCachedProducts = ({ categoryId, search } = {}) => {
     const term = (search || "").trim().toLowerCase();
     return cache.products.filter((product) => {

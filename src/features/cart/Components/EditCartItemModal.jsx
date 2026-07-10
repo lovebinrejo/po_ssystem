@@ -21,6 +21,10 @@ const getAvatarColor = (productId) => AVATAR_COLORS[(productId || 0) % AVATAR_CO
 function EditCartItemModal({ item, onClose, onSave, onRemove }) {
     const terminalConfig = useAuthStore((state) => state.terminalConfig);
     const terminalNumber = terminalConfig?.terminalNumber || 1;
+    // Mirrors legacy's isPasscodeRequired() (pos-cart-editor.js) — the gate is
+    // per-terminal (TAKEPOS_ENABLE_PASSCODE{n}, surfaced by api/login as
+    // terminal_config.passcode_enabled), not always-on.
+    const passcodeEnabled = !!terminalConfig?.passcode_enabled;
     const showToast = usePosStore((state) => state.showToast);
     const overlayRef = useRef(null);
 
@@ -43,13 +47,13 @@ function EditCartItemModal({ item, onClose, onSave, onRemove }) {
             setOriginalPrice(item.price);
             setDiscountPercent(item.discountPercent || 0);
             setReduceStock(item.reduceStock ?? true);
-            setPriceLocked(true);
-            setPriceUnlocked(false);
+            setPriceLocked(passcodeEnabled);
+            setPriceUnlocked(!passcodeEnabled);
             setPasscodePanelOpen(false);
             setPasscodeValue("");
             setPasscodeError("");
         }
-    }, [item]);
+    }, [item, passcodeEnabled]);
 
     // Prevent the product grid behind the overlay from scrolling while this
     // modal is open. Mirrors ReportsModal's fix: DashboardLayout's content
@@ -86,11 +90,11 @@ function EditCartItemModal({ item, onClose, onSave, onRemove }) {
     const discountAmount = subtotal * (discountPercent / 100);
     const lineTotal = subtotal - discountAmount;
 
-    // Clicking/focusing the price field either unlocks it directly (already
-    // unlocked this session) or shows the passcode panel — a passcode is
-    // always required to edit price, every time this modal opens.
+    // Clicking/focusing the price field either unlocks it directly (passcode
+    // gate off for this terminal, or already unlocked this session) or shows
+    // the passcode panel. Mirrors legacy's handlePriceEditRequest().
     const handlePriceFieldInteract = () => {
-        if (priceUnlocked) {
+        if (!passcodeEnabled || priceUnlocked) {
             setPriceLocked(false);
             setPasscodePanelOpen(false);
             return;
@@ -130,9 +134,10 @@ function EditCartItemModal({ item, onClose, onSave, onRemove }) {
     const priceChanged = Math.round(unitPrice * 100) !== Math.round(originalPrice * 100);
 
     const handleSave = () => {
-        // Belt-and-suspenders, mirrors legacy: block the save if the price
-        // actually changed and the passcode gate was never cleared.
-        if (priceChanged && !priceUnlocked) {
+        // Belt-and-suspenders, mirrors legacy: block the save if the passcode
+        // gate is on for this terminal, the price actually changed, and the
+        // gate was never cleared.
+        if (passcodeEnabled && priceChanged && !priceUnlocked) {
             setPasscodePanelOpen(true);
             setPasscodeError("Passcode is required to change the price");
             showToast("Passcode is required to change the price", "error");
@@ -254,7 +259,9 @@ function EditCartItemModal({ item, onClose, onSave, onRemove }) {
                         </div>
                         {!passcodePanelOpen && (
                             <p className="text-[11px] text-gray-500 dark:text-slate-400 mt-0.5">
-                                Click the price field to unlock it from inside this window.
+                                {passcodeEnabled
+                                    ? "Click the price field to unlock it from inside this window."
+                                    : "You can edit the unit price directly."}
                             </p>
                         )}
 

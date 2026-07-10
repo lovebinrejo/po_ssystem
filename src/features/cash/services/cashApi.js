@@ -1,6 +1,6 @@
 import { handleUnauthorized } from "../../../services/authGuard";
+import { getApiBaseUrl } from "../../../services/apiConfig";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const ENDPOINT = "/api/pos/cash_control/index.php";
 
 const authHeaders = () => {
@@ -18,7 +18,7 @@ const get = async (params) => {
     const query = new URLSearchParams(params).toString();
     let response;
     try {
-        response = await fetch(`${API_BASE_URL}${ENDPOINT}?${query}`, {
+        response = await fetch(`${getApiBaseUrl()}${ENDPOINT}?${query}`, {
             headers: authHeaders(),
         });
     } catch {
@@ -42,7 +42,7 @@ const postForm = async (params) => {
     const body = new URLSearchParams(params);
     let response;
     try {
-        response = await fetch(`${API_BASE_URL}${ENDPOINT}?${query}`, {
+        response = await fetch(`${getApiBaseUrl()}${ENDPOINT}?${query}`, {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded", ...authHeaders() },
             body,

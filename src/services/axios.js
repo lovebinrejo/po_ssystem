@@ -1,8 +1,7 @@
 import { handleUnauthorized } from "./authGuard";
+import { getApiBaseUrl } from "./apiConfig";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-
-const buildUrl = (path) => `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+const buildUrl = (path) => `${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
 
 const authHeaders = () => {
     const token = localStorage.getItem("token");

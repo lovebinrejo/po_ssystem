@@ -43,6 +43,15 @@ export function usePaymentBase() {
         setError(err.response?.data?.error || err.message || "Payment failed");
     };
 
+    // Mirrors legacy's processPayment() guard (pos-payment-integrated.js):
+    // throws right before submission if there's no customer selected and the
+    // terminal has no default to fall back to (same fallback `socid` above
+    // already applies) — legacy surfaces this as a toast; callers here let
+    // handleError's catch do the same via the `error` state.
+    const requireCustomer = () => {
+        if (!socid) throw new Error("No customer selected");
+    };
+
     // Clears the previous sale's outcome — PaymentModal stays mounted across
     // opens (only its `open` prop toggles), so without this the next sale
     // would keep showing the last completed receipt instead of a fresh form.
@@ -67,6 +76,7 @@ export function usePaymentBase() {
         completedReceipt,
         finalizePayment,
         handleError,
+        requireCustomer,
         resetPaymentState,
         showToast,
     };

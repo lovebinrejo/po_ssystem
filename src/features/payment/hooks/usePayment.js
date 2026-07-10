@@ -25,6 +25,7 @@ export function usePayment() {
         completedReceipt,
         finalizePayment,
         handleError,
+        requireCustomer,
         resetPaymentState,
         showToast,
     } = usePaymentBase();
@@ -58,6 +59,7 @@ export function usePayment() {
         setSubmitting(true);
         setError("");
         try {
+            requireCustomer();
             // A cart already saved as a Draft has a validated invoice sitting
             // behind it (see saveDraft below) — settle that same invoice
             // instead of creating a second one for the same sale.
@@ -105,6 +107,7 @@ export function usePayment() {
         setSavingDraft(true);
         setError("");
         try {
+            requireCustomer();
             const res = await submitPayment({
                 socid,
                 lines: buildPaymentLines(cart),

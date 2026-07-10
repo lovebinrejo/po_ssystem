@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import LoginForm from "./LoginForm";
 import { useLogin } from "../hooks/useLogin";
-import { isTokenExpired } from "../../../utils/jwt";
+import { getApiBaseUrl, setApiBaseUrl } from "../../../services/apiConfig";
+import { clearCache } from "../../../services/posCache";
+import useAuthStore from "../stores/authStore";
 import SocialIcon from "../../../components/SocialIcon";
 import logo from "../../../assets/Ecuenta_logo_png.png";
 import panelBg from "../../../assets/img.png";
@@ -17,18 +19,40 @@ function Login() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [masterEntity, setMasterEntity] = useState(1);
+    // Optional — lets a cashier point this build at any Dolibarr backend
+    // (e.g. a URL copied straight out of the legacy POS) without a rebuild.
+    // Left blank, login proceeds against whatever this build was already
+    // configured with (.env / .env.production / .env.htdocs).
+    const [backendUrl, setBackendUrl] = useState("");
     const navigate = useNavigate();
     const { login, error } = useLogin();
+    const logout = useAuthStore((state) => state.logout);
 
-    useEffect(() => {
-        const token = localStorage.getItem("token");
-        if (token && !isTokenExpired(token)) {
-            navigate("/pos", { replace: true });
-        }
-    }, [navigate]);
+    // Deliberately no "already logged in → auto-redirect to /pos" effect here
+    // (there used to be one). With a fixed build-time backend that was a safe
+    // convenience; now that the backend is switchable from this exact form,
+    // it actively broke switching — a still-valid token from a previous
+    // session bounced the user to /pos before they could even type a new
+    // Backend URL, so it silently never took effect. ProtectedRoute still
+    // handles the reverse case (no valid token → redirect to /login) on its
+    // own, so nothing relies on this component doing it too.
 
     const handleLogin = async () => {
         try {
+            if (backendUrl.trim()) {
+                const previousBase = getApiBaseUrl();
+                setApiBaseUrl(backendUrl);
+                if (getApiBaseUrl() !== previousBase) {
+                    // Actually switching backends — any token or cached
+                    // products/customers from the old one belong to a
+                    // different Dolibarr instance and are meaningless (or
+                    // actively wrong) here. Drop them up front so there's no
+                    // stale cross-backend state left over even if the login
+                    // below fails.
+                    logout();
+                    clearCache();
+                }
+            }
             const result = await login(email, password, masterEntity);
             if (result.success) {
                 navigate("/pos");
@@ -95,9 +119,11 @@ style={{
                         email={email}
                         password={password}
                         masterEntity={masterEntity}
+                        backendUrl={backendUrl}
                         setEmail={setEmail}
                         setPassword={setPassword}
                         setMasterEntity={setMasterEntity}
+                        setBackendUrl={setBackendUrl}
                         onLogin={handleLogin}
                     />
 

@@ -12,6 +12,7 @@ import {
     Clock,
     User,
     Power,
+    Globe,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ import TablesModal from "../features/tables/Components/TablesModal";
 import { getActiveSession } from "../features/cash/services/cashApi";
 import usePosStore from "../features/pos/stores/posStore";
 import { initCache, refreshCache } from "../services/posCache";
+import { getApiBaseUrl } from "../services/apiConfig";
 
 // Mirrors legacy's sidebar tooltip behavior: a custom instant show/hide
 // tooltip instead of the native `title` attribute. Native title tooltips have
@@ -174,6 +176,7 @@ function PosSidebar({ onLogout }) {
             />
 
             <div className="mt-auto flex flex-col">
+                <NavIcon icon={Globe} title={`Backend: ${getApiBaseUrl()}`} />
                 <NavIcon icon={Monitor} title={`Terminal ${terminalNumber}`} badge={terminalNumber} />
                 <NavIcon icon={Clock} title="Clock In" />
                 <NavIcon icon={User} title={userTitle} />

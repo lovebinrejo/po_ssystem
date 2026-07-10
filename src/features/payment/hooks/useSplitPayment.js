@@ -26,6 +26,7 @@ export function useSplitPayment() {
         completedReceipt,
         finalizePayment,
         handleError,
+        requireCustomer,
     } = usePaymentBase();
 
     const [lines, setLines] = useState(() => [newLine(), newLine()]);
@@ -54,6 +55,7 @@ export function useSplitPayment() {
         let invoiceRef = "";
 
         try {
+            requireCustomer();
             for (const line of lines) {
                 const amount = parseFloat(line.amount) || 0;
                 if (amount <= 0) continue;

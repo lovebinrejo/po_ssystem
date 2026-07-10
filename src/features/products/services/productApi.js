@@ -1,9 +1,21 @@
 import { get } from "../../../services/axios";
+import { getApiBaseUrl } from "../../../services/apiConfig";
 
-const API_ORIGIN = new URL(import.meta.env.VITE_API_BASE_URL).origin;
+// The configured base is a full absolute URL in dev/production builds (or
+// after a user overrides it from the login screen — e.g.
+// "https://demo1.ecuenta.online"), but a bare path in the "htdocs" same-origin
+// build ("/ecuenta9/htdocs" — see .env.htdocs). new URL() throws on that
+// path-only form, so only extract an origin when there's an actual one to
+// extract; same-origin builds don't need a prefix at all since the photo
+// path below is already domain-root-relative. Computed fresh on each call
+// (not cached at module load) since the base can now change at runtime.
+const getApiOrigin = () => {
+    const rawBase = getApiBaseUrl();
+    return /^https?:\/\//.test(rawBase) ? new URL(rawBase).origin : "";
+};
 
 // The legacy API returns domain-relative photo paths (e.g. "/ecuenta9/htdocs/takeposnew/genimg/...").
-export const buildProductImageUrl = (photoPath) => (photoPath ? `${API_ORIGIN}${photoPath}` : null);
+export const buildProductImageUrl = (photoPath) => (photoPath ? `${getApiOrigin()}${photoPath}` : null);
 
 // Normalizes the legacy API's field names (label/price_ttc/photo) to the
 // name/price/image shape the rest of the app (ProductGrid, CartPanel, posStore) expects.

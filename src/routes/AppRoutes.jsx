@@ -30,7 +30,7 @@ const PLACEHOLDER_ROUTES = [
 
 function AppRoutes() {
     return (
-        <BrowserRouter>
+        <BrowserRouter basename={import.meta.env.BASE_URL}>
             <Routes>
                 <Route path="/" element={<Navigate to="/pos" />} />
                 <Route path="/login" element={<Login />} />

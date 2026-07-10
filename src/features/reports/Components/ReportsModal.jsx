@@ -14,10 +14,16 @@ import {
     FileSpreadsheet,
     FileDown,
     Loader2,
+    Banknote,
+    CreditCard,
+    Smartphone,
+    Landmark,
+    FileCheck,
+    HelpCircle,
 } from "lucide-react";
 import useAuthStore from "../../authentication/stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
-import { getInvoicesInRange } from "../services/reportsApi";
+import { getInvoicesInRange, getReportsInRange, getPaymentSummary } from "../services/reportsApi";
 import { fetchReceipt } from "../services/receiptApi";
 import { printReceipt } from "./InvoiceReceipt";
 import { exportReportExcel, exportReportPDF } from "./ReportExport";
@@ -64,12 +70,25 @@ const reportsQueryKey = (terminal, filters) => [
     filters.search,
 ];
 
+// Mirrors payment_summary.php's own icon heuristic (code/label substring
+// match) so the cards look the same as legacy, just with lucide icons
+// instead of FontAwesome classes.
+const getPaymentIcon = (code, label) => {
+    const s = `${code} ${label}`.toLowerCase();
+    if (s.includes("card")) return CreditCard;
+    if (s.includes("cash")) return Banknote;
+    if (s.includes("mobile")) return Smartphone;
+    if (s.includes("bank")) return Landmark;
+    if (s.includes("cheque") || s.includes("check")) return FileCheck;
+    return HelpCircle;
+};
+
 // Maps api/invoices/index.php's generic invoice shape onto what this table
-// needs. Note two real gaps vs. the old (undeployed) api/pos/reports
-// endpoint: this isn't scoped to POS/this terminal (it's every invoice in the
-// entity), and payment_type/change aren't in the list response (only via a
-// per-invoice detail call, intentionally skipped here for speed) — see
-// [[pos_standalone_auth_session_guard]] sibling note in reportsApi.js.
+// needs. Only used as the fallback path when the real takeposnew endpoint
+// (getReportsInRange, same-origin only) isn't reachable — see reportsApi.js.
+// This fallback still isn't scoped to POS/this terminal (it's every invoice
+// in the entity, filtered client-side by "IPOS-" ref prefix — see
+// isPosInvoice below).
 const mapInvoiceToEntry = (inv) => {
     const paye = inv.paye === 1;
     const totalPaid = paye && inv.sumpayed === 0 ? inv.total_ttc : inv.sumpayed;
@@ -79,17 +98,31 @@ const mapInvoiceToEntry = (inv) => {
         ref: inv.ref,
         date: formatInvoiceDate(inv.date),
         customer: inv.socname || inv.thirdparty_name || "-",
+        paymentType: inv.payment_type || "Not Specified",
         total_ht: inv.total_ht,
         total_tva: inv.total_tva,
         total_ttc: inv.total_ttc,
         pending,
+        change: inv.change || 0,
         received: totalPaid,
+        author: inv.author || "-",
         currency: inv.currency || inv.multicurrency_code || "ZMW",
         status: inv.status_label,
     };
 };
 
 const fetchReports = async (terminal, filters) => {
+    // Real, terminal-scoped takeposnew data when available (htdocs build with
+    // a working legacy session) — see getReportsInRange. Returns null (rather
+    // than throwing) when not applicable/available, so this always falls back
+    // to the api/invoices/index.php path below instead of breaking Reports.
+    const legacy = await getReportsInRange({
+        startDate: toIso(filters.start),
+        endDate: toIso(filters.end),
+        search: filters.search,
+    });
+    if (legacy) return legacy;
+
     const invoices = await getInvoicesInRange({ startDate: toIso(filters.start), endDate: toIso(filters.end) });
     const term = filters.search.trim().toLowerCase();
     const entries = invoices
@@ -153,6 +186,16 @@ function ReportsModal({ open, onClose }) {
         // every "Apply Filter" click instead of just updating the numbers in
         // place — keeps showing the previous result while the new one loads.
         placeholderData: keepPreviousData,
+    });
+
+    // Not keyed by filters/terminal — payment_summary.php ignores date params
+    // and isn't terminal-scoped (see getPaymentSummary's comment), so there's
+    // nothing meaningful to re-key on. Resolves to null off the same-origin
+    // path or on any failure; rendered as a pure enhancement below.
+    const { data: paymentSummary } = useQuery({
+        queryKey: ["reports-payment-summary"],
+        queryFn: getPaymentSummary,
+        enabled: open,
     });
 
     const entries = data?.entries ?? [];
@@ -403,9 +446,36 @@ function ReportsModal({ open, onClose }) {
                         <ReportsSkeleton />
                     ) : (
                         <div className={`flex-1 min-h-0 flex flex-col gap-3 transition-opacity ${isFetching ? "opacity-50" : ""}`}>
-                            {/* Totals summary row. No Payment Summary (cash/card/mobile breakdown) here —
-                                that needs each invoice's payment method, which api/invoices/index.php's
-                                list response doesn't include (see reportsApi.js). */}
+                            {/* Payment method breakdown — mirrors legacy's payment-summary-cards.
+                                Only populated same-origin (see getPaymentSummary); silently absent
+                                otherwise, same as legacy's own "always current month" quirk. */}
+                            {paymentSummary && paymentSummary.payments.length > 0 && (
+                                <div className="shrink-0 grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))" }}>
+                                    {paymentSummary.payments.map((p) => {
+                                        const Icon = getPaymentIcon(p.code, p.label);
+                                        const pct = paymentSummary.total > 0 ? ((p.amount / paymentSummary.total) * 100).toFixed(1) : "0.0";
+                                        return (
+                                            <div
+                                                key={p.code || p.label}
+                                                className="flex items-center justify-between gap-2 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 shadow-sm px-3 py-2"
+                                            >
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <div className="w-8 h-8 shrink-0 rounded-lg bg-[#397db9] text-white flex items-center justify-center">
+                                                        <Icon size={15} />
+                                                    </div>
+                                                    <span className="text-xs font-semibold truncate">{p.label}</span>
+                                                </div>
+                                                <div className="flex flex-col items-end shrink-0">
+                                                    <span className="text-sm font-bold whitespace-nowrap">ZMW {p.amount.toFixed(2)}</span>
+                                                    <span className="text-[10px] text-gray-500 dark:text-slate-400 whitespace-nowrap">{p.count} · {pct}%</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            {/* Totals summary row. */}
                             {totals && (
                                 <div className="shrink-0 flex flex-wrap gap-3">
                                     <div className="flex-1 min-w-[150px] flex flex-col justify-center leading-tight rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 shadow-sm px-4 py-1">
@@ -482,11 +552,14 @@ function ReportsModal({ open, onClose }) {
                                                 <SortableHeader label="Date" field="date" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <SortableHeader label="Invoice No" field="ref" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <SortableHeader label="Third Party" field="customer" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                                                <SortableHeader label="Payment Type" field="paymentType" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <SortableHeader label="Amount (Excl. Tax)" field="total_ht" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
                                                 <SortableHeader label="VAT" field="total_tva" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
                                                 <SortableHeader label="Amount (Inc. Tax)" field="total_ttc" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
                                                 <SortableHeader label="Pending" field="pending" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                                                <SortableHeader label="Change" field="change" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
                                                 <SortableHeader label="Received" field="received" sortField={sortField} sortDir={sortDir} onSort={handleSort} align="right" />
+                                                <SortableHeader label="Author" field="author" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <SortableHeader label="Currency" field="currency" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <SortableHeader label="Status" field="status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                                                 <th className="text-center px-2.5 py-1 text-xs whitespace-nowrap bg-gray-50 dark:bg-slate-800">Actions</th>
@@ -495,7 +568,7 @@ function ReportsModal({ open, onClose }) {
                                         <tbody>
                                             {visibleEntries.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan={11} className="text-center py-6 text-gray-400 dark:text-slate-500">
+                                                    <td colSpan={14} className="text-center py-6 text-gray-400 dark:text-slate-500">
                                                         No entries found
                                                     </td>
                                                 </tr>
@@ -512,13 +585,16 @@ function ReportsModal({ open, onClose }) {
                                                         <td className="px-2.5 py-1 whitespace-nowrap">{entry.date}</td>
                                                         <td className="px-2.5 py-1 font-semibold whitespace-nowrap">{entry.ref}</td>
                                                         <td className="px-2.5 py-1 max-w-[90px] truncate">{entry.customer}</td>
+                                                        <td className="px-2.5 py-1 whitespace-nowrap">{entry.paymentType}</td>
                                                         <td className="px-2.5 py-1 text-right">{entry.total_ht.toFixed(2)}</td>
                                                         <td className="px-2.5 py-1 text-right">{entry.total_tva.toFixed(2)}</td>
                                                         <td className="px-2.5 py-1 text-right font-semibold">{entry.total_ttc.toFixed(2)}</td>
                                                         <td className={`px-2.5 py-1 text-right ${entry.pending > 0 ? "text-amber-500 font-semibold" : ""}`}>
                                                             {entry.pending.toFixed(2)}
                                                         </td>
+                                                        <td className="px-2.5 py-1 text-right">{entry.change.toFixed(2)}</td>
                                                         <td className="px-2.5 py-1 text-right">{entry.received.toFixed(2)}</td>
+                                                        <td className="px-2.5 py-1 max-w-[80px] truncate">{entry.author}</td>
                                                         <td className="px-2.5 py-1 whitespace-nowrap">{entry.currency}</td>
                                                         <td className="px-2.5 py-1 whitespace-nowrap">{entry.status}</td>
                                                         <td className="px-2.5 py-1 text-center">
@@ -546,15 +622,16 @@ function ReportsModal({ open, onClose }) {
                                         {totals && filteredEntries.length > 0 && (
                                             <tfoot className="sticky bottom-0 z-10 bg-gray-50 dark:bg-slate-800 font-semibold shadow-[0_-1px_0_0_rgba(0,0,0,0.1)]">
                                                 <tr>
-                                                    <td colSpan={3} className="text-right px-2.5 py-1">
+                                                    <td colSpan={4} className="text-right px-2.5 py-1">
                                                         Total
                                                     </td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.total_ht.toFixed(2)}</td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.total_tva.toFixed(2)}</td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.total_ttc.toFixed(2)}</td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.pending.toFixed(2)}</td>
+                                                    <td></td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.received.toFixed(2)}</td>
-                                                    <td colSpan={3}></td>
+                                                    <td colSpan={4}></td>
                                                 </tr>
                                             </tfoot>
                                         )}
