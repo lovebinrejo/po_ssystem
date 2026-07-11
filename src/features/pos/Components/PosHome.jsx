@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Lock } from "lucide-react";
+import { ChevronLeft, ChevronRight, Lock } from "lucide-react";
 import usePosStore from "../stores/posStore";
 import { useCategories } from "../../categories/hooks/useCategories";
 import { useProducts } from "../../products/hooks/useProducts";
@@ -7,6 +7,9 @@ import CategoryTabs from "../../categories/Components/CategoryTabs";
 import ProductGrid, { ProductGridSkeleton } from "../../products/Components/ProductGrid";
 import CartPanel from "../../cart/Components/CartPanel";
 import CartToast from "./CartToast";
+
+// Matches legacy's productsPerPage default (pos-app.js: `window.ECUENTA_POS?.productsPerPage || 25`).
+const PRODUCTS_PER_PAGE = 25;
 
 // Mirrors legacy's disablePOSOperations() overlay injected onto .products-grid
 // when no cash session is open for this terminal.
@@ -64,6 +67,45 @@ function CashDeskClosedOverlay({ targetRef }) {
     );
 }
 
+// Mirrors legacy's renderPagination(): caps the grid at PRODUCTS_PER_PAGE
+// items with Previous/Next controls, instead of one long scrollable list of
+// every matching product.
+function ProductPagination({ page, totalPages, onChange }) {
+    if (totalPages <= 1) return null;
+
+    return (
+        <div className="shrink-0 flex items-center justify-center gap-2 pt-2">
+            <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => onChange(page - 1)}
+                className={`w-8 h-8 flex items-center justify-center rounded-lg border font-semibold transition-colors ${
+                    page <= 1
+                        ? "border-gray-200 dark:border-slate-700 text-gray-300 dark:text-slate-600 cursor-not-allowed"
+                        : "border-blue-500 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 cursor-pointer"
+                }`}
+            >
+                <ChevronLeft size={16} />
+            </button>
+            <span className="text-sm font-medium text-gray-600 dark:text-slate-300">
+                Page {page} of {totalPages}
+            </span>
+            <button
+                type="button"
+                disabled={page >= totalPages}
+                onClick={() => onChange(page + 1)}
+                className={`w-8 h-8 flex items-center justify-center rounded-lg border font-semibold transition-colors ${
+                    page >= totalPages
+                        ? "border-gray-200 dark:border-slate-700 text-gray-300 dark:text-slate-600 cursor-not-allowed"
+                        : "border-blue-500 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 cursor-pointer"
+                }`}
+            >
+                <ChevronRight size={16} />
+            </button>
+        </div>
+    );
+}
+
 function PosHome() {
     const cart = usePosStore((state) => state.cart);
     const searchTerm = usePosStore((state) => state.searchTerm);
@@ -72,6 +114,7 @@ function PosHome() {
     const removeFromCart = usePosStore((state) => state.removeFromCart);
     const cashSessionOpen = usePosStore((state) => state.cashSessionOpen);
     const [selectedCategory, setSelectedCategory] = useState("All");
+    const [page, setPage] = useState(1);
     const gridWrapperRef = useRef(null);
 
     const { categories, error: categoriesError } = useCategories();
@@ -83,6 +126,24 @@ function PosHome() {
 
     const categoryLabels = ["All", ...categories.map((c) => c.label)];
     const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+
+    // A new category or search term is a brand-new result set — always start
+    // back on page 1 rather than stranding the cashier on, say, page 3 of a
+    // filtered list that might only have 1 page. Reset during render (not an
+    // effect) by comparing against the filter key from the previous render.
+    const filterKey = `${selectedCategoryId ?? "all"}::${searchTerm}`;
+    const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+    if (filterKey !== prevFilterKey) {
+        setPrevFilterKey(filterKey);
+        setPage(1);
+    }
+
+    const totalPages = Math.max(1, Math.ceil(products.length / PRODUCTS_PER_PAGE));
+    const safePage = Math.min(page, totalPages);
+    const visibleProducts = products.slice(
+        (safePage - 1) * PRODUCTS_PER_PAGE,
+        safePage * PRODUCTS_PER_PAGE
+    );
 
     return (
         <div className="flex flex-row gap-1 h-full min-h-0">
@@ -106,12 +167,13 @@ function PosHome() {
                         <ProductGridSkeleton />
                     ) : (
                         <ProductGrid
-                            products={products}
+                            products={visibleProducts}
                             onAddToCart={addToCart}
                             onDecrement={(id) => changeQty(id, -1)}
                         />
                     )}
                 </div>
+                {!loading && <ProductPagination page={safePage} totalPages={totalPages} onChange={setPage} />}
                 {!cashSessionOpen && <CashDeskClosedOverlay targetRef={gridWrapperRef} />}
             </div>
 

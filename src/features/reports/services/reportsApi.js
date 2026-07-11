@@ -124,13 +124,18 @@ const fetchInvoicesPage = ({ startDate, endDate, limit, offset }) =>
 // (unlike legacy's reports.php), so it returns every invoice in the entity —
 // regular accounting invoices, credit notes, anything from other Dolibarr
 // modules — not just POS sales. That field isn't even in the response to
-// filter on directly. Confirmed empirically instead: Dolibarr's POS numbering
-// mask always prefixes a validated POS invoice's ref with "IPOS-" (e.g.
-// "IPOS-26-0021"), while non-POS refs use other masks ("IN-V-...", "CR-V-...")
-// or the generic "(PROVxxx)" placeholder before validation. Filtering on that
-// prefix is a client-side proxy for the missing pos_source column, restoring
-// legacy's POS-only scoping without a backend change.
-const isPosInvoice = (invoice) => (invoice.ref || "").startsWith("IPOS-");
+// filter on directly. Approximated instead via the validated POS invoice's
+// ref prefix, which is a client-side proxy for the missing pos_source column
+// — but that mask is a per-instance Dolibarr admin setting, not a constant:
+// the local WAMP instance is configured as "IPOS-{yy}-{seq}", while
+// demo1.ecuenta.online is configured as "TC{terminal}-{yymm}-{seq}" (e.g.
+// "TC1-2607-0081") instead. Both are recognized here; a third differently-
+// configured instance would need its mask added too — this is inherently a
+// heuristic, not the real pos_source filter (see [[legacy_dolibarr_pos_backend]]).
+const isPosInvoice = (invoice) => {
+    const ref = invoice.ref || "";
+    return ref.startsWith("IPOS-") || /^TC\d+-/.test(ref);
+};
 
 // Pages through the full date range (the endpoint caps each response to
 // `limit` rows), mirroring posCache.js's fetchAllCustomers.

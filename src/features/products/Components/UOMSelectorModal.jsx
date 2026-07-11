@@ -19,6 +19,7 @@ function UOMSelectorModal({ product, onClose, onConfirm }) {
             code: unit.code,
             factor: unit.factor,
             price: unit.price_override_ttc > 0 ? unit.price_override_ttc : basePrice * unit.factor,
+            barcode: unit.uom_barcode || "",
             isBase: false,
         })),
     ];
@@ -94,6 +95,11 @@ function UOMSelectorModal({ product, onClose, onConfirm }) {
                                     <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
                                         {unit.isBase ? "Base unit" : `1 ${unit.label} = ${unit.factor} EA`}
                                     </p>
+                                    {unit.barcode && (
+                                        <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">
+                                            Barcode: {unit.barcode}
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="text-right shrink-0">
                                     <div className="text-lg font-bold text-violet-600 dark:text-violet-400">

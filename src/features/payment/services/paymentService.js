@@ -8,6 +8,12 @@ import { post } from "../../../services/axios";
 // without any backend changes.
 export const submitPayment = (payload) => post("/api/pos/payment/index.php", payload);
 
+// True Dolibarr draft (statut=0, never validated) — mirrors legacy's
+// submitCartAsDraft. Unlike submitPayment's deferred_payment flag, this
+// never decrements stock and the ref stays a (PROVxxx) placeholder until
+// the sale is actually paid later via submitPayment's existing_invoice_id.
+export const saveDraftInvoice = (payload) => post("/api/pos/draft/index.php", payload);
+
 // Product prices from the legacy API are tax-inclusive (price_ttc) and don't
 // carry a per-product tax rate yet, so the HT/TTC split below is a flat
 // placeholder estimate until that data is available from the backend.

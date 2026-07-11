@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import usePosStore from "../../pos/stores/posStore";
 import useCustomerStore from "../../customers/stores/customerStore";
-import { TAX_RATE, buildPaymentLines, submitPayment } from "../services/paymentService";
+import { TAX_RATE, buildPaymentLines, submitPayment, saveDraftInvoice } from "../services/paymentService";
 import { openLencoWidget } from "../services/lencoService";
 import { usePaymentBase } from "./usePaymentBase";
 
@@ -88,15 +88,15 @@ export function usePayment() {
 
     const completePayment = () => settlePayment(selectedMethod, parseFloat(amountTendered) || 0);
 
-    // Saves the current cart as a validated-but-unpaid invoice via
-    // api/pos/payment's deferred_payment flag (create+validate, skip
-    // recording a Paiement row) — real backend logic, but not otherwise
-    // exercised by this app today (payViaLenco settles normally after the
-    // widget succeeds, never using this flag). The invoice lands in Reports
-    // as "Pending". The cart is deliberately left as-is (not cleared): the
-    // cashier keeps working the same sale, cart items just flip to a
-    // "Pending" badge, and settlePayment above reuses this invoice via
-    // existing_invoice_id when the cart hasn't been touched since.
+    // Saves the current cart as a TRUE Dolibarr draft invoice (statut=0,
+    // never validated) via api/pos/draft — mirrors legacy's submitCartAsDraft
+    // (takeposnew/ajax/waiter_ajax.php). Stock is not decremented and the ref
+    // stays a (PROVxxx) placeholder until the sale is actually paid. The cart
+    // is deliberately left as-is (not cleared): the cashier keeps working the
+    // same sale, cart items just flip to a "Pending" badge, and settlePayment
+    // above reuses this invoice via existing_invoice_id when the cart hasn't
+    // been touched since — that path already validates correctly at pay time
+    // (api/pos/payment only validates `if ($invoice->statut == STATUS_DRAFT)`).
     const saveDraft = async () => {
         if (cart.length === 0 || pendingInvoice || draftInvoiceId) return;
         // Reference snapshot: posStore's cart mutations always replace the
@@ -108,14 +108,11 @@ export function usePayment() {
         setError("");
         try {
             requireCustomer();
-            const res = await submitPayment({
+            const res = await saveDraftInvoice({
                 socid,
                 lines: buildPaymentLines(cart),
-                payment_method_code: selectedMethod,
-                payment_amount: total,
                 terminal: terminalNumber,
                 place: parseInt(activePlace, 10) || 0,
-                deferred_payment: true,
             });
 
             if (!res.success) throw new Error(res.error || "Failed to save draft");
@@ -127,7 +124,14 @@ export function usePayment() {
                 showToast(`Draft saved successfully — ${res.invoice_ref} (cart changed meanwhile, re-save to link it)`);
             }
         } catch (err) {
+            // handleError only sets `error` state, which nothing outside
+            // PaymentModal renders — CartPanel (where this button actually
+            // lives) never shows it, so a failure here was previously
+            // completely silent to the cashier. A toast is the only feedback
+            // mechanism CartPanel already has wired up.
             handleError(err);
+            const message = err.response?.data?.error || err.message || "Failed to save draft";
+            showToast(message, "error");
         } finally {
             setSavingDraft(false);
         }

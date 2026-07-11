@@ -10,14 +10,20 @@ function LoginForm({
     password,
     masterEntity,
     backendUrl,
+    loading,
     setEmail,
     setPassword,
     setMasterEntity,
     setBackendUrl,
     onLogin
 }) {
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onLogin();
+    };
+
     return (
-        <div className="w-full max-w-sm">
+        <form className="w-full max-w-sm" onSubmit={handleSubmit}>
             <div className="space-y-4">
                 <Input
                     name="email"
@@ -59,12 +65,12 @@ function LoginForm({
                 </div>
             </div>
             <Button
-                text="LOGIN"
-                onclick={onLogin}
-                type="button"
+                text={loading ? "LOGGING IN..." : "LOGIN"}
+                type="submit"
+                disabled={loading}
                 className="mt-6 w-full py-3 rounded-full tracking-widest"
             />
-        </div>
+        </form>
     );
 }
 

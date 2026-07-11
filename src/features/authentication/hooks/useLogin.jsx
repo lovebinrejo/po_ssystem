@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { loginUser } from "../services/authService";
 import useAuthStore from "../stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
@@ -10,8 +10,16 @@ export const useLogin = () => {
     const setToken = useAuthStore((state) => state.setToken);
     const setTerminalConfig = useAuthStore((state) => state.setTerminalConfig);
     const stampLoginTime = usePosStore((state) => state.stampLoginTime);
+    // Disabling the button on `loading` covers the normal case, but a fast
+    // double-click can fire both events before React commits that re-render
+    // — this ref is checked synchronously, so it closes that race regardless
+    // of render timing (confirmed live: without it, a rapid double-click
+    // fired two concurrent POST /api/login/index.php requests).
+    const submittingRef = useRef(false);
 
     const login = async (email, password, masterEntity) => {
+        if (submittingRef.current) return { success: false };
+        submittingRef.current = true;
         try {
             setLoading(true);
             setError("");
@@ -29,6 +37,7 @@ export const useLogin = () => {
             throw err;
         } finally {
             setLoading(false);
+            submittingRef.current = false;
         }
     };
 

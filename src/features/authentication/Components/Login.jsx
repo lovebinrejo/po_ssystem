@@ -25,7 +25,7 @@ function Login() {
     // configured with (.env / .env.production / .env.htdocs).
     const [backendUrl, setBackendUrl] = useState("");
     const navigate = useNavigate();
-    const { login, error } = useLogin();
+    const { login, error, loading } = useLogin();
     const logout = useAuthStore((state) => state.logout);
 
     // Deliberately no "already logged in → auto-redirect to /pos" effect here
@@ -120,6 +120,7 @@ style={{
                         password={password}
                         masterEntity={masterEntity}
                         backendUrl={backendUrl}
+                        loading={loading}
                         setEmail={setEmail}
                         setPassword={setPassword}
                         setMasterEntity={setMasterEntity}

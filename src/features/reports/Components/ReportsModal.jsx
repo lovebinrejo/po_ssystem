@@ -87,8 +87,8 @@ const getPaymentIcon = (code, label) => {
 // needs. Only used as the fallback path when the real takeposnew endpoint
 // (getReportsInRange, same-origin only) isn't reachable — see reportsApi.js.
 // This fallback still isn't scoped to POS/this terminal (it's every invoice
-// in the entity, filtered client-side by "IPOS-" ref prefix — see
-// isPosInvoice below).
+// in the entity, filtered client-side by a per-instance ref-prefix heuristic
+// — see isPosInvoice below).
 const mapInvoiceToEntry = (inv) => {
     const paye = inv.paye === 1;
     const totalPaid = paye && inv.sumpayed === 0 ? inv.total_ttc : inv.sumpayed;

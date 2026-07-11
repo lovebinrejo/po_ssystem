@@ -2,12 +2,22 @@ import { fetchProducts } from "../features/products/services/productApi";
 import { fetchCustomersPage } from "../features/customers/services/customerApi";
 import { fetchCategories } from "../features/categories/services/categoryApi";
 
-// Mirrors legacy's pos-cache-manager.js / pos-cache-integration.js: a
-// localStorage-backed cache of products/customers/categories so searches run
-// instantly against local data instead of round-tripping to the server on
-// every keystroke. Same 24h expiry, same "load from storage if fresh, else
-// fetch everything from the server" init behavior, same manual force-refresh
-// triggered by the sidebar's "Sync Data (Refresh Cache)" button.
+// Mirrors legacy's pos-cache-manager.js / pos-cache-integration.js in
+// behavior (same 24h expiry, same "load from storage if fresh, else fetch
+// everything from the server" init behavior, same manual force-refresh
+// triggered by the sidebar's "Sync Data (Refresh Cache)" button) but not in
+// storage engine: legacy and this app's own earlier version both used
+// localStorage, but a large product catalog can bump into localStorage's
+// ~5-10MB ceiling and its synchronous JSON.stringify/parse blocks the main
+// thread. This version persists to IndexedDB instead — effectively no size
+// ceiling, and the get/put calls are async so they never block rendering.
+// The in-memory `cache` object below is still the synchronous source of
+// truth searchCachedCustomers reads from — only the on-disk persistence
+// layer changed, so every existing caller (useCustomers, PosSidebar,
+// Login.jsx) needed zero changes. searchCachedProducts still exists here but
+// is currently unused — product loading was moved to always-live (see
+// useProducts.jsx), matching useCategories.jsx, which never read from this
+// cache either.
 const CACHE_VERSION = "1.0";
 const CACHE_DURATION_MS = 24 * 60 * 60 * 1000;
 const CUSTOMER_PAGE_SIZE = 200;
@@ -19,33 +29,90 @@ const STORAGE_KEYS = {
     META: "pos_cache_meta",
 };
 
+const DB_NAME = "pos_standalone_cache";
+const DB_VERSION = 1;
+const STORE_NAME = "kv";
+
+// One-time migration courtesy: the old localStorage-backed version of this
+// cache used the same STORAGE_KEYS as plain top-level keys. Nothing reads
+// those anymore, so drop them instead of leaving dead data sitting around.
+try {
+    Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
+} catch {
+    // localStorage unavailable — nothing to migrate away from either.
+}
+
+const openDb = () =>
+    new Promise((resolve, reject) => {
+        try {
+            const req = indexedDB.open(DB_NAME, DB_VERSION);
+            req.onupgradeneeded = () => req.result.createObjectStore(STORE_NAME);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        } catch (err) {
+            reject(err);
+        }
+    });
+
 let cache = { products: [], customers: [], categories: [] };
 let ready = false;
 let initPromise = null;
 
-const loadFromStorage = () => {
+const idbGet = async (key) => {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+        const req = db.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+};
+
+const idbSet = async (key, value) => {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        tx.objectStore(STORE_NAME).put(value, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+};
+
+const idbDelete = async (key) => {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        tx.objectStore(STORE_NAME).delete(key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+};
+
+const loadFromStorage = async () => {
     try {
-        const meta = JSON.parse(localStorage.getItem(STORAGE_KEYS.META) || "null");
+        const meta = await idbGet(STORAGE_KEYS.META);
         if (!meta || meta.version !== CACHE_VERSION) return null;
         if (Date.now() - meta.savedAt > CACHE_DURATION_MS) return null;
-        return {
-            products: JSON.parse(localStorage.getItem(STORAGE_KEYS.PRODUCTS) || "[]"),
-            customers: JSON.parse(localStorage.getItem(STORAGE_KEYS.CUSTOMERS) || "[]"),
-            categories: JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || "[]"),
-        };
+        const [products, customers, categories] = await Promise.all([
+            idbGet(STORAGE_KEYS.PRODUCTS),
+            idbGet(STORAGE_KEYS.CUSTOMERS),
+            idbGet(STORAGE_KEYS.CATEGORIES),
+        ]);
+        return { products: products || [], customers: customers || [], categories: categories || [] };
     } catch {
         return null;
     }
 };
 
-const saveToStorage = () => {
+const saveToStorage = async () => {
     try {
-        localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(cache.products));
-        localStorage.setItem(STORAGE_KEYS.CUSTOMERS, JSON.stringify(cache.customers));
-        localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(cache.categories));
-        localStorage.setItem(STORAGE_KEYS.META, JSON.stringify({ version: CACHE_VERSION, savedAt: Date.now() }));
+        await Promise.all([
+            idbSet(STORAGE_KEYS.PRODUCTS, cache.products),
+            idbSet(STORAGE_KEYS.CUSTOMERS, cache.customers),
+            idbSet(STORAGE_KEYS.CATEGORIES, cache.categories),
+            idbSet(STORAGE_KEYS.META, { version: CACHE_VERSION, savedAt: Date.now() }),
+        ]);
     } catch {
-        // localStorage full/unavailable (e.g. private browsing) — cache still
+        // IndexedDB full/unavailable (e.g. private browsing) — cache still
         // works for this session, it just won't survive a reload.
     }
 };
@@ -72,17 +139,17 @@ export const refreshCache = async () => {
     ]);
     cache = { products, customers, categories };
     ready = true;
-    saveToStorage();
+    await saveToStorage();
     return cache;
 };
 
-// Loads from localStorage if it's still fresh, otherwise fetches everything
+// Loads from IndexedDB if it's still fresh, otherwise fetches everything
 // from the server once. Safe to call multiple times — subsequent calls reuse
 // the same in-flight/completed promise.
 export const initCache = () => {
     if (initPromise) return initPromise;
     initPromise = (async () => {
-        const stored = loadFromStorage();
+        const stored = await loadFromStorage();
         if (stored) {
             cache = stored;
             ready = true;
@@ -99,19 +166,15 @@ export const isCacheReady = () => ready;
 // initCache() call to fetch fresh, regardless of the 24h TTL. Used when the
 // active backend URL changes (see Login.jsx) — a cache built from one
 // Dolibarr instance is meaningless (or actively wrong) once pointed at a
-// different one.
+// different one. Callers (Login.jsx) don't await this, so the IndexedDB
+// deletes are fire-and-forget — the in-memory reset above is what actually
+// matters synchronously; the deletes just keep the next reload from finding
+// stale data.
 export const clearCache = () => {
     cache = { products: [], customers: [], categories: [] };
     ready = false;
     initPromise = null;
-    try {
-        localStorage.removeItem(STORAGE_KEYS.PRODUCTS);
-        localStorage.removeItem(STORAGE_KEYS.CUSTOMERS);
-        localStorage.removeItem(STORAGE_KEYS.CATEGORIES);
-        localStorage.removeItem(STORAGE_KEYS.META);
-    } catch {
-        // localStorage unavailable — the in-memory reset above still applies.
-    }
+    Object.values(STORAGE_KEYS).forEach((key) => idbDelete(key).catch(() => {}));
 };
 
 export const searchCachedProducts = ({ categoryId, search } = {}) => {

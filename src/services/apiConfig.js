@@ -5,7 +5,16 @@ const STORAGE_KEY = "pos_backend_base_url";
 // and reduces it to the API base every service file expects — the Dolibarr
 // docroot itself, sibling to api/, takepos/, takeposnew/ (see
 // .env.production's comment on VITE_API_BASE_URL). Also accepts a bare
-// domain/base ("https://demo1.ecuenta.online") unchanged.
+// domain/base ("https://demo1.ecuenta.online") unchanged. The "/index.php"
+// cut handles any other Dolibarr page living directly in the docroot (e.g.
+// the dashboard, "https://demo1.ecuenta.online/index.php?mainmenu=dashboard")
+// — without it, that URL was left with "/index.php" stuck on the end, so
+// every API call built on top of it (e.g. ".../index.php/api/invoices/index.php")
+// got routed by Apache's PATH_INFO handling back into Dolibarr's own front
+// controller, which returns the HTML login page instead of JSON. Doesn't
+// cover Dolibarr pages nested in subfolders (e.g. "/societe/card.php") —
+// only ones sitting at the docroot itself, which is what the dashboard/login
+// page always is.
 export const normalizeBackendUrl = (input) => {
     let url = (input || "").trim();
     if (!url) return "";
@@ -15,7 +24,7 @@ export const normalizeBackendUrl = (input) => {
         const idx = url.indexOf(marker);
         return idx === -1 ? null : url.slice(0, idx);
     };
-    return cutAt("/takeposnew") ?? cutAt("/takepos") ?? cutAt("/api/") ?? url;
+    return cutAt("/takeposnew") ?? cutAt("/takepos") ?? cutAt("/api/") ?? cutAt("/index.php") ?? url;
 };
 
 // Falls back to the build-time default (.env / .env.production / .env.htdocs)
