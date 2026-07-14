@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import usePosStore from "../../pos/stores/posStore";
-import useCustomerStore from "../../customers/stores/customerStore";
-import { TAX_RATE, buildPaymentLines, submitPayment, saveDraftInvoice } from "../services/paymentService";
+import { TAX_RATE, buildPaymentLines, computeCartTotals, submitPayment, saveDraftInvoice } from "../services/paymentService";
 import { openLencoWidget } from "../services/lencoService";
 import { usePaymentBase } from "./usePaymentBase";
 
@@ -9,7 +8,7 @@ import { usePaymentBase } from "./usePaymentBase";
 // Payment, which has its own hook for the sequential multi-call settlement).
 export function usePayment() {
     const hasHydrated = usePosStore((state) => state.hasHydrated);
-    const selectedCustomer = useCustomerStore((state) => state.selectedCustomer);
+    const selectedCustomer = usePosStore((state) => state.selectedCustomer);
     const {
         cart,
         activePlace,
@@ -31,8 +30,14 @@ export function usePayment() {
     } = usePaymentBase();
 
     const itemCount = cart.reduce((sum, item) => sum + item.qty, 0);
-    const subtotalExcl = total / (1 + TAX_RATE);
-    const tax = total - subtotalExcl;
+    // Settling a pending invoice: total is remainToPay (possibly a partial
+    // balance), not the cart sum, and its locked items don't carry a real
+    // per-line VAT rate — keep the flat-rate approximation there. A fresh
+    // cart's total always equals its own sum, so the real per-line split
+    // from computeCartTotals applies directly.
+    const cartTotals = computeCartTotals(cart);
+    const subtotalExcl = pendingInvoice ? total / (1 + TAX_RATE) : cartTotals.subtotalExcl;
+    const tax = pendingInvoice ? total - subtotalExcl : cartTotals.tax;
 
     const draftInvoice = usePosStore((state) => state.draftInvoice);
     const setDraftInvoice = usePosStore((state) => state.setDraftInvoice);
@@ -108,18 +113,47 @@ export function usePayment() {
         setError("");
         try {
             requireCustomer();
-            const res = await saveDraftInvoice({
-                socid,
-                lines: buildPaymentLines(cart),
-                terminal: terminalNumber,
-                place: parseInt(activePlace, 10) || 0,
-            });
-
-            if (!res.success) throw new Error(res.error || "Failed to save draft");
+            let res;
+            let usedFallback = false;
+            try {
+                res = await saveDraftInvoice({
+                    socid,
+                    lines: buildPaymentLines(cart),
+                    terminal: terminalNumber,
+                    place: parseInt(activePlace, 10) || 0,
+                });
+                if (!res.success) throw new Error(res.error || "Failed to save draft");
+            } catch (primaryErr) {
+                // api/pos/draft/index.php isn't deployed on every backend
+                // (e.g. demo/demo1.ecuenta.online — confirmed 404 there,
+                // while api/pos/payment/index.php is confirmed present
+                // everywhere). Fall back to that universally-deployed
+                // endpoint's deferred_payment flag, which creates and
+                // validates the invoice but skips recording a payment —
+                // functionally a held sale, just validated (stock
+                // decremented, real ref) rather than a true statut=0 draft.
+                usedFallback = true;
+                res = await submitPayment({
+                    socid,
+                    lines: buildPaymentLines(cart),
+                    payment_method_code: selectedMethod,
+                    payment_amount: total,
+                    terminal: terminalNumber,
+                    place: parseInt(activePlace, 10) || 0,
+                    deferred_payment: true,
+                });
+                if (!res.success) {
+                    throw new Error(res.error || primaryErr.message || "Failed to save draft", { cause: primaryErr });
+                }
+            }
 
             if (usePosStore.getState().cart === cartSnapshot) {
                 setDraftInvoice({ id: res.invoice_id, ref: res.invoice_ref });
-                showToast(`Draft saved successfully — ${res.invoice_ref}`);
+                showToast(
+                    usedFallback
+                        ? `Draft saved — ${res.invoice_ref} (held as a validated invoice on this server)`
+                        : `Draft saved successfully — ${res.invoice_ref}`
+                );
             } else {
                 showToast(`Draft saved successfully — ${res.invoice_ref} (cart changed meanwhile, re-save to link it)`);
             }

@@ -79,13 +79,23 @@ function CategoryTabs({ categories, selectedCategory, onSelect }) {
 
     return (
         <div ref={outerRef} className="relative mb-1 pl-0 pr-2 pt-2 pb-1">
-            {/* Off-screen clone used only to measure real button widths */}
-            <div ref={measureRef} className="absolute -top-96 left-0 flex gap-2 invisible pointer-events-none" aria-hidden="true">
-                {categories.map((category) => (
-                    <span key={category} className="px-3 py-1.5 text-sm rounded-full whitespace-nowrap font-medium">
-                        {category}
-                    </span>
-                ))}
+            {/* Off-screen clone used only to measure real button widths. Wrapped
+                in a zero-size overflow-hidden box so a shop with enough
+                categories to overflow one row doesn't force the whole page into
+                horizontal scroll — an absolutely positioned element still
+                contributes to a scrolling ancestor's scrollable area even
+                though it's outside normal layout flow, and nothing above this
+                in the tree clips it otherwise. offsetWidth on the children
+                (used for the fit calculation) is unaffected by the ancestor's
+                overflow clipping. */}
+            <div className="absolute -top-96 left-0 w-0 h-0 overflow-hidden pointer-events-none" aria-hidden="true">
+                <div ref={measureRef} className="flex gap-2">
+                    {categories.map((category) => (
+                        <span key={category} className="px-3 py-1.5 text-sm rounded-full whitespace-nowrap font-medium">
+                            {category}
+                        </span>
+                    ))}
+                </div>
             </div>
 
             <div ref={containerRef} className="flex flex-nowrap items-center gap-2 overflow-hidden">

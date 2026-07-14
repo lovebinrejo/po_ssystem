@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:prod": "vite --mode production",
+    "dev:demo-proxy": "vite --mode demo-proxy",
     "build": "vite build",
     "build:htdocs": "vite build --mode htdocs",
     "lint": "eslint .",

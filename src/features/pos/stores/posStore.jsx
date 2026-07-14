@@ -39,6 +39,23 @@ const usePosStore = create(
             draftInvoicesByPlace: {},
             draftInvoice: null,
 
+            // Mirrors legacy's pos-state.js (saveCustomerForPlace/loadCustomerForPlace):
+            // each parallel sale has its own selected customer, saved/restored on
+            // every place switch — a brand-new sale always starts with none selected,
+            // same as legacy's `customer: null` in createNewParallelSale(). The
+            // one-time default-customer auto-load (CustomerSelector.jsx) only ever
+            // applies to place "0" on first load, matching legacy's loadDefaultCustomer()
+            // being called once on page load and never again for later parallel sales.
+            customersByPlace: { "0": null },
+            selectedCustomer: null,
+            setSelectedCustomer: (customer) => {
+                const place = get().activePlace;
+                set({
+                    customersByPlace: { ...get().customersByPlace, [place]: customer },
+                    selectedCustomer: customer,
+                });
+            },
+
             // False until the persisted cartsByPlace/activePlace have been
             // read back from localStorage (onRehydrateStorage below runs
             // asynchronously, after the first render) — so screens relying
@@ -188,17 +205,19 @@ const usePosStore = create(
 
             // Opens a new, independent sale (legacy: createNewParallelSale) and switches to it.
             createNewSale: () => {
-                const { sales, cartsByPlace, pendingInvoicesByPlace, draftInvoicesByPlace } = get();
+                const { sales, cartsByPlace, pendingInvoicesByPlace, draftInvoicesByPlace, customersByPlace } = get();
                 const newPlace = `0-${sales.length}`;
                 set({
                     sales: [...sales, { place: newPlace, time: getCurrentTime() }],
                     cartsByPlace: { ...cartsByPlace, [newPlace]: [] },
                     pendingInvoicesByPlace: { ...pendingInvoicesByPlace, [newPlace]: null },
                     draftInvoicesByPlace: { ...draftInvoicesByPlace, [newPlace]: null },
+                    customersByPlace: { ...customersByPlace, [newPlace]: null },
                     activePlace: newPlace,
                     cart: [],
                     pendingInvoice: null,
                     draftInvoice: null,
+                    selectedCustomer: null,
                 });
                 return newPlace;
             },
@@ -210,6 +229,7 @@ const usePosStore = create(
                     cart: get().cartsByPlace[place] || [],
                     pendingInvoice: get().pendingInvoicesByPlace[place] || null,
                     draftInvoice: get().draftInvoicesByPlace[place] || null,
+                    selectedCustomer: get().customersByPlace[place] || null,
                 });
             },
 
@@ -228,7 +248,7 @@ const usePosStore = create(
             // Discards a parallel sale. Legacy only protects place '0' (the main
             // sale) from deletion — any other sale can always be closed.
             deleteSale: (place) => {
-                const { sales, activePlace, cartsByPlace, pendingInvoicesByPlace, draftInvoicesByPlace } = get();
+                const { sales, activePlace, cartsByPlace, pendingInvoicesByPlace, draftInvoicesByPlace, customersByPlace } = get();
                 if (place === "0") return false;
 
                 const remainingSales = sales.filter((sale) => sale.place !== place);
@@ -238,6 +258,8 @@ const usePosStore = create(
                 delete remainingPending[place];
                 const remainingDrafts = { ...draftInvoicesByPlace };
                 delete remainingDrafts[place];
+                const remainingCustomers = { ...customersByPlace };
+                delete remainingCustomers[place];
 
                 if (activePlace === place) {
                     const nextPlace = "0";
@@ -246,10 +268,12 @@ const usePosStore = create(
                         cartsByPlace: remainingCarts,
                         pendingInvoicesByPlace: remainingPending,
                         draftInvoicesByPlace: remainingDrafts,
+                        customersByPlace: remainingCustomers,
                         activePlace: nextPlace,
                         cart: remainingCarts[nextPlace] || [],
                         pendingInvoice: remainingPending[nextPlace] || null,
                         draftInvoice: remainingDrafts[nextPlace] || null,
+                        selectedCustomer: remainingCustomers[nextPlace] || null,
                     });
                 } else {
                     set({
@@ -257,6 +281,7 @@ const usePosStore = create(
                         cartsByPlace: remainingCarts,
                         pendingInvoicesByPlace: remainingPending,
                         draftInvoicesByPlace: remainingDrafts,
+                        customersByPlace: remainingCustomers,
                     });
                 }
                 return true;
@@ -273,12 +298,14 @@ const usePosStore = create(
                 cartsByPlace: state.cartsByPlace,
                 pendingInvoicesByPlace: state.pendingInvoicesByPlace,
                 draftInvoicesByPlace: state.draftInvoicesByPlace,
+                customersByPlace: state.customersByPlace,
             }),
             onRehydrateStorage: () => (state) => {
                 if (state) {
                     state.cart = state.cartsByPlace[state.activePlace] || [];
                     state.pendingInvoice = (state.pendingInvoicesByPlace || {})[state.activePlace] || null;
                     state.draftInvoice = (state.draftInvoicesByPlace || {})[state.activePlace] || null;
+                    state.selectedCustomer = (state.customersByPlace || {})[state.activePlace] || null;
                     state.hasHydrated = true;
                 }
             },

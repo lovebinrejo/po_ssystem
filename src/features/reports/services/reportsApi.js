@@ -1,5 +1,6 @@
 import { get } from "../../../services/axios";
 import { getApiBaseUrl, isSameOriginBackend } from "../../../services/apiConfig";
+import { cacheInvoicesList, getCachedInvoicesList } from "../../../services/posCache";
 
 // api/pos/reports/index.php (a POS-scoped, payment-method-aware endpoint) isn't
 // deployed on the live server, and this project can't push backend changes
@@ -36,7 +37,16 @@ const fetchLegacyReports = async ({ startDate, endDate, search }) => {
     const response = await fetch(`${getApiBaseUrl()}/takeposnew/api/reports_data.php?${params}`, {
         credentials: "same-origin",
     });
-    const data = await response.json();
+    let data;
+    try {
+        data = await response.json();
+    } catch {
+        // Most commonly means the session cookie wasn't actually sent/valid —
+        // Dolibarr's login page HTML came back instead of JSON. See
+        // [[pos_standalone_demo_proxy]] for why this specific failure mode is
+        // what made "Author missing in Reports" so hard to diagnose blind.
+        throw new Error(`reports_data.php returned non-JSON (status ${response.status}) — likely no valid session cookie was sent`);
+    }
     if (!data.success) throw new Error(data.error || "Failed to load reports");
 
     return {
@@ -66,14 +76,18 @@ const fetchLegacyReports = async ({ startDate, endDate, search }) => {
 // the legacy session expired independently of the JWT one. Keeps Reports
 // working either way instead of hard-depending on the legacy session.
 export const getReportsInRange = async ({ startDate, endDate, search }) => {
-    if (isSameOriginBackend()) {
-        try {
-            return await fetchLegacyReports({ startDate, endDate, search });
-        } catch {
-            // fall through to the invoices-API path below
-        }
+    if (!isSameOriginBackend()) {
+        console.info(`[legacy-reports] skipped — isSameOriginBackend() is false (getApiBaseUrl="${getApiBaseUrl()}"). Falling back to api/invoices/index.php (no Author/Payment Type/Change on this server).`);
+        return null;
     }
-    return null;
+    try {
+        const result = await fetchLegacyReports({ startDate, endDate, search });
+        console.info(`[legacy-reports] reports_data.php succeeded — ${result.entries.length} entries with real Author/Payment Type.`);
+        return result;
+    } catch (err) {
+        console.warn("[legacy-reports] reports_data.php failed, falling back to api/invoices/index.php:", err.message);
+        return null;
+    }
 };
 
 // Same-origin only: takeposnew's own payment_summary.php — totals grouped by
@@ -85,10 +99,9 @@ export const getReportsInRange = async ({ startDate, endDate, search }) => {
 // `daterange` param, this always reflects the *current month* regardless of
 // whatever range is selected in the entries table below. Known legacy quirk,
 // intentionally replicated here rather than "fixed" — see
-// [[legacy-dolibarr-pos-backend]]. Returns null (not a throw) on any failure
-// or when not same-origin, so callers can treat it as a pure enhancement.
-export const getPaymentSummary = async () => {
-    if (!isSameOriginBackend()) return null;
+// [[legacy-dolibarr-pos-backend]]. Returns null on failure so the caller
+// falls through to summarizeInvoicePayments below.
+const fetchLegacyPaymentSummary = async () => {
     try {
         const response = await fetch(`${getApiBaseUrl()}/takeposnew/api/payment_summary.php`, {
             credentials: "same-origin",
@@ -110,6 +123,84 @@ export const getPaymentSummary = async () => {
     }
 };
 
+// Universal fallback for when the same-origin legacy path above isn't
+// available (the normal case — see [[pos_standalone_no_backend_changes]]:
+// user explicitly doesn't want backend endpoints touched at all, even for a
+// one-line typo fix, so this builds the aggregate client-side instead, from
+// whichever per-invoice endpoint is actually working on the configured
+// server). Tries api/pos/receipt/index.php first — its payments SQL is
+// correct (uses the real `p.datep` column) and returns real payment data
+// wherever that endpoint itself is reachable (confirmed live on local WAMP).
+// Falls back to api/invoices/index.php's detail action otherwise (e.g.
+// api/pos/receipt returning "Include of main fails" on the shared
+// demo/demo1.ecuenta.online deployment — confirmed both hostnames resolve
+// to the same backend, same bug, live) — but that endpoint's own payments
+// sub-query references a nonexistent column (`p.datepaye` instead of
+// `p.datep`) and always comes back empty, a real backend bug this project
+// isn't touching. So on that server, every path comes up empty and this
+// legitimately has no data to show — not a frontend gap, there's simply no
+// working endpoint left to ask.
+const fetchInvoicePayments = async (invoiceId) => {
+    try {
+        const data = await get(`/api/pos/receipt/index.php?id=${invoiceId}`);
+        if (data.success) return data.receipt.payments || [];
+    } catch {
+        // fall through
+    }
+    try {
+        const detail = await fetchInvoiceDetail(invoiceId);
+        if (detail.success) {
+            return (detail.invoice.payments || []).map((p) => ({ amount: p.amount, payment_label: p.method_label, payment_code: p.method_code }));
+        }
+    } catch {
+        // no data available from either endpoint on this server
+    }
+    return [];
+};
+
+// api/invoices/index.php's list response has no payment-method field at all
+// (see isPosInvoice's comment) — this fetches per-invoice payment data for
+// every invoice in the current result set and aggregates client-side.
+// Unlike the legacy path above, this genuinely reflects the selected date
+// range (no "always current month" quirk) since there's no equivalent
+// server-side default to replicate here.
+// Capped at 100 invoices: this project has no way to batch/aggregate
+// server-side, so a very wide date range would otherwise fire that many
+// concurrent requests. Returns null past the cap rather than degrading
+// silently — callers just don't show the section for such a wide range.
+const PAYMENT_SUMMARY_INVOICE_CAP = 100;
+
+const summarizeInvoicePayments = async (invoices) => {
+    if (!invoices || invoices.length === 0 || invoices.length > PAYMENT_SUMMARY_INVOICE_CAP) return null;
+
+    const perInvoicePayments = await Promise.all(invoices.map((inv) => fetchInvoicePayments(inv.id)));
+
+    const byMethod = new Map();
+    let total = 0;
+    let totalCount = 0;
+    for (const payments of perInvoicePayments) {
+        for (const p of payments) {
+            const key = p.payment_code || p.payment_label || "other";
+            const existing = byMethod.get(key) || { code: p.payment_code || "", label: p.payment_label || "Not Specified", amount: 0, count: 0 };
+            existing.amount += Number(p.amount) || 0;
+            existing.count += 1;
+            byMethod.set(key, existing);
+            total += Number(p.amount) || 0;
+            totalCount += 1;
+        }
+    }
+    if (totalCount === 0) return null;
+    return { payments: Array.from(byMethod.values()), total, totalCount };
+};
+
+export const getPaymentSummary = async (invoices) => {
+    if (isSameOriginBackend()) {
+        const legacy = await fetchLegacyPaymentSummary();
+        if (legacy) return legacy;
+    }
+    return summarizeInvoicePayments(invoices);
+};
+
 const fetchInvoicesPage = ({ startDate, endDate, limit, offset }) =>
     get(
         `${ENDPOINT}?${new URLSearchParams({
@@ -119,6 +210,16 @@ const fetchInvoicesPage = ({ startDate, endDate, limit, offset }) =>
             offset: String(offset),
         })}`
     );
+
+// action=detail: full single-invoice fetch (customer, lines, payments, ZRA
+// SDC data) — routed to automatically by the backend whenever `id` is
+// present without an explicit `action`. Used by receiptApi.js as a fallback
+// data source when api/pos/receipt/index.php itself is unavailable on the
+// configured server (see [[pos_standalone_no_backend_changes]] — that
+// endpoint is broken server-side on demo.ecuenta.online with no way for
+// this project to patch it, so receipts fall back to reshaping this
+// already-working, already-used-for-Reports endpoint instead).
+export const fetchInvoiceDetail = (invoiceId) => get(`${ENDPOINT}?id=${invoiceId}`);
 
 // api/invoices/index.php's query has no "AND f.pos_source IS NOT NULL" filter
 // (unlike legacy's reports.php), so it returns every invoice in the entity —
@@ -132,22 +233,45 @@ const fetchInvoicesPage = ({ startDate, endDate, limit, offset }) =>
 // "TC1-2607-0081") instead. Both are recognized here; a third differently-
 // configured instance would need its mask added too — this is inherently a
 // heuristic, not the real pos_source filter (see [[legacy_dolibarr_pos_backend]]).
+//
+// True drafts (api/pos/draft) never get a validated ref — they stay a
+// "(PROVxxx)" placeholder until paid — so the prefix check alone always
+// excludes them, unlike legacy's own reports_data.php (which scopes by
+// module_source/pos_source and has no status exclusion, so drafts show up
+// labeled "Draft"). api/invoices/index.php doesn't return ref_client either,
+// so there's no reliable way to confirm a draft's POS origin here; falling
+// back to "any draft" is a deliberate, known-imprecise proxy (a non-POS
+// draft invoice elsewhere in this entity would also show up) rather than
+// the real pos_source filter.
 const isPosInvoice = (invoice) => {
     const ref = invoice.ref || "";
-    return ref.startsWith("IPOS-") || /^TC\d+-/.test(ref);
+    if (ref.startsWith("IPOS-") || /^TC\d+-/.test(ref)) return true;
+    return invoice.status_label === "Draft";
 };
 
 // Pages through the full date range (the endpoint caps each response to
-// `limit` rows), mirroring posCache.js's fetchAllCustomers.
+// `limit` rows), mirroring posCache.js's fetchAllCustomers. Network-first:
+// invoices change constantly as new sales happen, so a live fetch is always
+// attempted first — the cached copy of this exact date range is only used
+// as a fallback if the live fetch fails outright (e.g. no network), so
+// Reports keeps showing the last known-good data instead of an error.
 export const getInvoicesInRange = async ({ startDate, endDate }) => {
-    const all = [];
-    let offset = 0;
-    while (true) {
-        const res = await fetchInvoicesPage({ startDate, endDate, limit: PAGE_SIZE, offset });
-        if (!res.success) throw new Error(res.message || res.error || "Failed to load invoices");
-        all.push(...res.invoices);
-        offset += res.invoices.length;
-        if (res.invoices.length === 0 || offset >= res.total_count) break;
+    try {
+        const all = [];
+        let offset = 0;
+        while (true) {
+            const res = await fetchInvoicesPage({ startDate, endDate, limit: PAGE_SIZE, offset });
+            if (!res.success) throw new Error(res.message || res.error || "Failed to load invoices");
+            all.push(...res.invoices);
+            offset += res.invoices.length;
+            if (res.invoices.length === 0 || offset >= res.total_count) break;
+        }
+        const filtered = all.filter(isPosInvoice);
+        cacheInvoicesList(startDate, endDate, filtered);
+        return filtered;
+    } catch (err) {
+        const cached = await getCachedInvoicesList(startDate, endDate);
+        if (cached) return cached;
+        throw err;
     }
-    return all.filter(isPosInvoice);
 };

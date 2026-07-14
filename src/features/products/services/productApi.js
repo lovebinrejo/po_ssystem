@@ -19,6 +19,12 @@ export const buildProductImageUrl = (photoPath) => (photoPath ? `${getApiOrigin(
 
 // Normalizes the legacy API's field names (label/price_ttc/photo) to the
 // name/price/image shape the rest of the app (ProductGrid, CartPanel, posStore) expects.
+// tvaRate/vatSrcCode carry the product's real configured VAT rate (16, 0, ...)
+// and ZRA VAT source code ('A', 'D', 'C3', ...) through to the cart and,
+// from there, into buildPaymentLines — api/pos/products/index.php already
+// returns both (tva_tx/vat_src_code), they just weren't read here before,
+// so every sale was charged a flat 16% regardless of the product's actual
+// rate, silently wrong for anything VAT-exempt or otherwise non-standard.
 const normalizeProduct = (product) => ({
     id: product.id,
     name: product.label,
@@ -32,6 +38,8 @@ const normalizeProduct = (product) => ({
     unit: product.unit_label,
     hasUom: product.has_uom,
     uomUnits: product.uom_units || [],
+    tvaRate: Number(product.tva_tx) || 0,
+    vatSrcCode: product.vat_src_code || product.default_vat_code || "",
 });
 
 export const fetchProducts = async ({ categoryId, search } = {}) => {

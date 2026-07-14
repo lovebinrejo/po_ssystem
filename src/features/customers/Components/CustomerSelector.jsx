@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, UserPlus, X, ChevronDown, Phone, Mail, IdCard } from "lucide-react";
 import { useCustomers } from "../hooks/useCustomers";
-import useCustomerStore from "../stores/customerStore";
-import useAuthStore from "../../authentication/stores/authStore";
-import { fetchCustomerById } from "../services/customerApi";
+import usePosStore from "../../pos/stores/posStore";
 import AddCustomerModal from "./AddCustomerModal";
 
 const getInitials = (name = "") =>
@@ -19,25 +17,14 @@ function CustomerSelector() {
     const [open, setOpen] = useState(false);
     const [addCustomerOpen, setAddCustomerOpen] = useState(false);
     const { customers, loading } = useCustomers(query);
-    const selectedCustomer = useCustomerStore((state) => state.selectedCustomer);
-    const setSelectedCustomer = useCustomerStore((state) => state.setSelectedCustomer);
-    const terminalConfig = useAuthStore((state) => state.terminalConfig);
+    const selectedCustomer = usePosStore((state) => state.selectedCustomer);
+    const setSelectedCustomer = usePosStore((state) => state.setSelectedCustomer);
     const containerRef = useRef(null);
-    const loadedDefault = useRef(false);
-
-    // Mirrors legacy's loadDefaultCustomer(): auto-select the terminal's
-    // configured default customer (TAKEPOS_DEFAULT_CUSTOMER) once, on load.
-    useEffect(() => {
-        if (loadedDefault.current || selectedCustomer) return;
-        const defaultId = terminalConfig?.defaultCustomerId;
-        if (!defaultId) return;
-        loadedDefault.current = true;
-        fetchCustomerById(defaultId)
-            .then((customer) => {
-                if (customer) setSelectedCustomer(customer);
-            })
-            .catch(() => {});
-    }, [terminalConfig, selectedCustomer, setSelectedCustomer]);
+    // No auto-selected default customer here by design — the cashier always
+    // sees an empty selector and must explicitly pick someone. There's no
+    // fallback to the terminal's configured default customer at submission
+    // time either (see usePaymentBase.js's `socid`/`requireCustomer`) — a
+    // customer must always be picked for every cart, full stop.
 
     useEffect(() => {
         const handleClickOutside = (e) => {

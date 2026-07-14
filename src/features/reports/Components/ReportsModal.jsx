@@ -20,12 +20,14 @@ import {
     Landmark,
     FileCheck,
     HelpCircle,
+    Eye,
+    Ruler,
 } from "lucide-react";
 import useAuthStore from "../../authentication/stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
 import { getInvoicesInRange, getReportsInRange, getPaymentSummary } from "../services/reportsApi";
 import { fetchReceipt } from "../services/receiptApi";
-import { printReceipt } from "./InvoiceReceipt";
+import { buildReceiptHtml, printReceipt } from "./InvoiceReceipt";
 import { exportReportExcel, exportReportPDF } from "./ReportExport";
 import DateRangePicker from "./DateRangePicker";
 
@@ -83,12 +85,36 @@ const getPaymentIcon = (code, label) => {
     return HelpCircle;
 };
 
+// api/invoices/index.php's own `status_label` only ever computes Draft/
+// Unpaid/Paid (statut==0 -> Draft always, then paye==1 -> Paid overrides
+// everything else) — it has no case for statut==3 (Abandoned) at all, so an
+// abandoned invoice silently shows as "Draft" or "Paid" depending on `paye`,
+// and statut==2 ("Classified Paid", a distinct Dolibarr state from a normal
+// validated-and-settled invoice) is indistinguishable from statut==1+paye==1.
+// Legacy's own takeposnew/api/reports_data.php computes this more precisely
+// from the exact same raw `fk_statut`/`paye` fields (also present in this
+// endpoint's response as `statut`/`paye`, just not used this way) — mirrored
+// here verbatim so drop-down filtering like isSettleable's "Abandoned" check
+// below actually has real data to match against instead of a value the old
+// status_label could never produce.
+const computeStatusLabel = (inv) => {
+    if (inv.statut === 0) return "Draft";
+    if (inv.statut === 1) return inv.paye === 1 ? "Paid" : "Validated (Unpaid)";
+    if (inv.statut === 2) return "Classified Paid";
+    if (inv.statut === 3) return "Abandoned";
+    return inv.status_label || "Unknown";
+};
+
 // Maps api/invoices/index.php's generic invoice shape onto what this table
 // needs. Only used as the fallback path when the real takeposnew endpoint
 // (getReportsInRange, same-origin only) isn't reachable — see reportsApi.js.
 // This fallback still isn't scoped to POS/this terminal (it's every invoice
 // in the entity, filtered client-side by a per-instance ref-prefix heuristic
-// — see isPosInvoice below).
+// — see isPosInvoice below). `author`/`payment_type`/`change` are also only
+// present in newer deployments of this endpoint (confirmed absent from the
+// shared demo/demo1.ecuenta.online deployment — a genuine backend-side gap
+// there, not a frontend one) — the "-"/"Not Specified"/0 fallbacks below are
+// what renders whenever a given server's copy doesn't return them.
 const mapInvoiceToEntry = (inv) => {
     const paye = inv.paye === 1;
     const totalPaid = paye && inv.sumpayed === 0 ? inv.total_ttc : inv.sumpayed;
@@ -107,7 +133,7 @@ const mapInvoiceToEntry = (inv) => {
         received: totalPaid,
         author: inv.author || "-",
         currency: inv.currency || inv.multicurrency_code || "ZMW",
-        status: inv.status_label,
+        status: computeStatusLabel(inv),
     };
 };
 
@@ -160,6 +186,13 @@ function ReportsModal({ open, onClose }) {
     const [sortField, setSortField] = useState("date");
     const [sortDir, setSortDir] = useState("desc");
     const [printingId, setPrintingId] = useState(null);
+    const [previewReceipt, setPreviewReceipt] = useState(null);
+    // Mirrors legacy's receipt.php controls (togglePreview/toggleWidth): a
+    // dark, perforated-edge "thermal roll" simulation on/off, and which of
+    // the two common thermal-printer paper widths the actual print job (and
+    // the simulation, when on) targets. Reset per-preview-open below.
+    const [thermalPreview, setThermalPreview] = useState(false);
+    const [thermalWidth, setThermalWidth] = useState(80);
     const [exportingExcel, setExportingExcel] = useState(false);
     const [printError, setPrintError] = useState("");
     const [loadingInvoiceId, setLoadingInvoiceId] = useState(null);
@@ -186,16 +219,30 @@ function ReportsModal({ open, onClose }) {
         // every "Apply Filter" click instead of just updating the numbers in
         // place — keeps showing the previous result while the new one loads.
         placeholderData: keepPreviousData,
+        // Overrides the app-wide 30s staleTime (main.jsx) — that default is
+        // fine for products/customers, which barely change, but Reports
+        // reflects live transaction state. With the default, closing the
+        // modal right after completing a payment and reopening it within
+        // 30s would silently reuse the pre-payment cached result and keep
+        // showing that invoice as "Pending" until 30s passed — confirmed
+        // live (the invoices API fired zero times on such a reopen before
+        // this fix). staleTime: 0 makes every open refetch immediately.
+        staleTime: 0,
     });
 
-    // Not keyed by filters/terminal — payment_summary.php ignores date params
-    // and isn't terminal-scoped (see getPaymentSummary's comment), so there's
-    // nothing meaningful to re-key on. Resolves to null off the same-origin
-    // path or on any failure; rendered as a pure enhancement below.
+    // Keyed by the same filters as the main query (unlike the legacy
+    // same-origin path inside getPaymentSummary, the client-side fallback it
+    // falls back to genuinely respects the selected date range — see
+    // reportsApi.js) and depends on `data` being loaded first, since that
+    // fallback aggregates from the invoices the main query already fetched.
+    // Resolves to null on the same-origin path's own failure, when there's
+    // nothing to summarize, or past the invoice-count cap for a wide range;
+    // rendered as a pure enhancement below either way.
     const { data: paymentSummary } = useQuery({
-        queryKey: ["reports-payment-summary"],
-        queryFn: getPaymentSummary,
-        enabled: open,
+        queryKey: [...reportsQueryKey(terminalNumber, filters), "payment-summary"],
+        queryFn: () => getPaymentSummary(data?.entries),
+        enabled: open && !!data,
+        staleTime: 0, // same reasoning as the query above — this is live payment data too.
     });
 
     const entries = data?.entries ?? [];
@@ -324,12 +371,16 @@ function ReportsModal({ open, onClose }) {
         });
     };
 
+    // Mirrors legacy's own receipt.php: reprinting from Reports shows a full
+    // preview first (Toggle Thermal Preview / Switch to 58mm / Print Receipt
+    // buttons there) rather than firing straight to window.print() with no
+    // chance to review — previewReceipt below renders that step.
     const handlePrintInvoice = async (entry) => {
         setPrintingId(entry.id);
         setPrintError("");
         try {
             const receipt = await fetchReceipt(entry.id);
-            printReceipt(receipt);
+            setPreviewReceipt(receipt);
         } catch (err) {
             setPrintError(err.message || "Failed to load receipt");
         } finally {
@@ -430,8 +481,21 @@ function ReportsModal({ open, onClose }) {
                         </button>
                     </div>
 
+                    {/* staleTime: 0 means every open triggers a background refetch — if
+                        that refetch fails, React Query keeps showing the last successful
+                        `data` (by design) while also setting `queryError`. Showing a hard
+                        "can't reach the server" banner above a table that's actually
+                        populated with real data is misleading, so the two states get
+                        different treatment: a small non-alarming note when we still have
+                        something to show, the full error only when there's nothing at all. */}
                     {queryError && (
-                        <p className="shrink-0 text-sm text-red-600 bg-red-50 dark:bg-red-500/10 rounded-lg px-3 py-2">{queryError.message}</p>
+                        data ? (
+                            <p className="shrink-0 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 rounded-lg px-3 py-1.5">
+                                Showing last loaded data — refreshing failed ({queryError.message})
+                            </p>
+                        ) : (
+                            <p className="shrink-0 text-sm text-red-600 bg-red-50 dark:bg-red-500/10 rounded-lg px-3 py-2">{queryError.message}</p>
+                        )
                     )}
 
                     {printError && (
@@ -710,6 +774,102 @@ function ReportsModal({ open, onClose }) {
                     </button>
                 </div>
             </div>
+
+            {previewReceipt && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+                    <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 text-gray-900 dark:text-white shadow-2xl overflow-hidden">
+                        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-slate-700">
+                            <div className="font-semibold text-sm">Invoice {previewReceipt.invoice_ref}</div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setPreviewReceipt(null);
+                                    setThermalPreview(false);
+                                }}
+                                className="p-1 rounded text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className="p-4">
+                            {/* Mirrors legacy's .thermal-preview: a dark backdrop with
+                                perforated top/bottom edges simulating a thermal paper
+                                roll, sized to the selected width — purely a visual
+                                on-screen simulation, doesn't affect the actual print
+                                output's own sizing (that's driven by thermalWidth
+                                directly, same as legacy's own preview-vs-print split). */}
+                            {thermalPreview ? (
+                                <div className="rounded-lg bg-[#333] p-4 flex justify-center">
+                                    <div className="bg-white rounded-sm overflow-hidden" style={{ width: `${thermalWidth}mm` }}>
+                                        <div
+                                            className="h-2.5"
+                                            style={{
+                                                backgroundImage:
+                                                    "repeating-linear-gradient(90deg, #fff, #fff 2px, transparent 2px, transparent 4px)",
+                                                backgroundColor: "#333",
+                                            }}
+                                        />
+                                        <iframe title="Receipt preview" srcDoc={buildReceiptHtml(previewReceipt, { thermalWidth })} className="w-full h-96 block" />
+                                        <div
+                                            className="h-2.5"
+                                            style={{
+                                                backgroundImage:
+                                                    "repeating-linear-gradient(90deg, #fff, #fff 2px, transparent 2px, transparent 4px)",
+                                                backgroundColor: "#333",
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="rounded-lg border border-gray-200 dark:border-slate-700 overflow-hidden bg-white">
+                                    <iframe title="Receipt preview" srcDoc={buildReceiptHtml(previewReceipt)} className="w-full h-96" />
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex flex-col items-center gap-2.5 px-5 py-3 border-t border-gray-200 dark:border-slate-700">
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setThermalPreview((v) => !v)}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700"
+                                >
+                                    <Eye size={14} />
+                                    Toggle Thermal Preview
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setThermalWidth((w) => (w === 80 ? 58 : 80))}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-amber-500 hover:bg-amber-600"
+                                >
+                                    <Ruler size={14} />
+                                    Switch to {thermalWidth === 80 ? 58 : 80}mm
+                                </button>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setPreviewReceipt(null);
+                                        setThermalPreview(false);
+                                    }}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-700"
+                                >
+                                    <X size={14} />
+                                    Close
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => printReceipt(previewReceipt, { thermalWidth })}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[#397db9] hover:bg-[#2c6291]"
+                                >
+                                    <Printer size={14} />
+                                    Print Receipt
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

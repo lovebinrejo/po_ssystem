@@ -14,24 +14,62 @@ export const submitPayment = (payload) => post("/api/pos/payment/index.php", pay
 // the sale is actually paid later via submitPayment's existing_invoice_id.
 export const saveDraftInvoice = (payload) => post("/api/pos/draft/index.php", payload);
 
-// Product prices from the legacy API are tax-inclusive (price_ttc) and don't
-// carry a per-product tax rate yet, so the HT/TTC split below is a flat
-// placeholder estimate until that data is available from the backend.
+// Fallback only — used for cart items that genuinely have no VAT rate of
+// their own (locked lines loaded from a Reports invoice via
+// loadInvoiceIntoCart, which only carries id/name/price/qty; the real
+// per-line rate already lives on the settled invoice server-side and isn't
+// needed again for those). Every product fetched normally through
+// productApi.js's normalizeProduct carries its own real `tvaRate` now, so
+// this default is not applied to standard cart items.
 export const TAX_RATE = 0.16;
+
+// Real per-product VAT rate (0-100, e.g. 16 or 0) — api/pos/products/index.php
+// already returns this (tva_tx/vat_src_code), previously dropped at the
+// productApi.js normalization step, so every sale was charged a flat 16%
+// regardless of the product's actual rate. That's not just a display bug:
+// ZRA's own fiscal (SDC) validation rejects the invoice outright when the
+// submitted VAT doesn't match what it independently computes from the
+// product/rate on file ("Wrong Total Tax amount computation"), so every
+// non-16%-rated product sold through this app was failing real tax-authority
+// submission. Falls back to TAX_RATE*100 only for items with no rate of
+// their own (see above).
+const lineTaxRate = (item) => (item.tvaRate ?? TAX_RATE * 100) / 100;
 
 // Shared by usePayment and useSplitPayment so both build identical line
 // payloads for api/pos/payment regardless of how many payment calls a sale
 // ends up needing.
 export const buildPaymentLines = (cart) =>
     cart.map((item) => {
+        const rate = lineTaxRate(item);
         const priceTtc = item.price;
-        const priceHt = priceTtc / (1 + TAX_RATE);
+        const priceHt = priceTtc / (1 + rate);
         return {
             fk_product: item.id,
             qty: item.qty,
             price: priceHt,
             subprice: priceTtc,
-            tva_tx: String(Math.round(TAX_RATE * 100)),
+            tva_tx: String(Math.round(rate * 100)),
+            vat_src_code: item.vatSrcCode || "",
             description: item.name,
         };
     });
+
+// Cart-wide HT/VAT split for display (CartPanel, PaymentModal summaries) —
+// summed per-line using each item's own real rate instead of applying one
+// flat rate to the whole cart total, so mixed-VAT carts (e.g. one exempt
+// item alongside standard-rated ones) show correct numbers on screen too,
+// not just in the actual submitted invoice.
+export const computeCartTotals = (cart) => {
+    let subtotalExcl = 0;
+    let tax = 0;
+    let total = 0;
+    cart.forEach((item) => {
+        const rate = lineTaxRate(item);
+        const lineTtc = item.price * item.qty;
+        const lineHt = lineTtc / (1 + rate);
+        subtotalExcl += lineHt;
+        tax += lineTtc - lineHt;
+        total += lineTtc;
+    });
+    return { subtotalExcl, tax, total };
+};

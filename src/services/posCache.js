@@ -202,3 +202,22 @@ export const searchCachedCustomers = (search) => {
 };
 
 export const getCachedCategories = () => cache.categories;
+
+// Read-only caching for Reports/receipts — network-first, cache-as-fallback
+// (the opposite of products/customers/categories above, which are
+// cache-first). Invoice/payment data changes constantly as new sales
+// happen, so a stale cache should never be preferred over a live fetch; it
+// only exists so Reports and receipt reprints keep working when the network
+// briefly drops, showing the last known-good data instead of an error.
+// Not part of the versioned `cache`/24h-TTL system above — these are simple
+// per-key snapshots, always overwritten by the latest successful fetch.
+const receiptKey = (invoiceId) => `pos_cache_receipt_${invoiceId}`;
+const invoicesListKey = (dateFrom, dateTo) => `pos_cache_invoices_${dateFrom}_${dateTo}`;
+
+export const cacheReceipt = (invoiceId, receipt) => idbSet(receiptKey(invoiceId), receipt).catch(() => {});
+export const getCachedReceipt = (invoiceId) => idbGet(receiptKey(invoiceId)).catch(() => null);
+
+export const cacheInvoicesList = (dateFrom, dateTo, invoices) =>
+    idbSet(invoicesListKey(dateFrom, dateTo), invoices).catch(() => {});
+export const getCachedInvoicesList = (dateFrom, dateTo) =>
+    idbGet(invoicesListKey(dateFrom, dateTo)).catch(() => null);

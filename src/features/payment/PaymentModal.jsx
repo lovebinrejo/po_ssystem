@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CreditCard, X } from "lucide-react";
+import { CheckCircle2, CreditCard, X } from "lucide-react";
 import { usePayment } from "./hooks/usePayment";
 import PaymentSummary from "./Components/PaymentSummary";
 import ScanToPay from "./Components/ScanToPay";
@@ -47,20 +47,42 @@ function PaymentModal({ open, onClose }) {
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto soft-scrollbar rounded-2xl bg-white dark:bg-slate-900 text-gray-900 dark:text-white shadow-2xl">
-                <div className="flex items-center justify-between px-6 py-2.5 bg-[#2c6291] rounded-t-2xl text-white">
+                <div
+                    className={`flex items-center justify-between px-6 py-2.5 rounded-t-2xl ${
+                        payment.completedReceipt
+                            ? "bg-white dark:bg-slate-900 text-gray-900 dark:text-white border-b border-gray-200 dark:border-slate-700"
+                            : "bg-[#2c6291] text-white"
+                    }`}
+                >
                     <div className="flex items-center gap-2 text-lg font-semibold">
-                        <CreditCard size={20} />
-                        {payment.pendingInvoice ? `Settle Invoice ${payment.pendingInvoice.ref}` : "Complete Payment"}
+                        {payment.completedReceipt ? (
+                            <CheckCircle2 size={20} className="text-emerald-600 dark:text-emerald-400" />
+                        ) : (
+                            <CreditCard size={20} />
+                        )}
+                        {payment.completedReceipt
+                            ? "Payment Successful - Receipt"
+                            : payment.pendingInvoice
+                            ? `Settle Invoice ${payment.pendingInvoice.ref}`
+                            : "Complete Payment"}
                     </div>
                     {!payment.submitting && (
-                        <button type="button" onClick={handleClose} className="p-1 rounded hover:bg-white/20">
+                        <button
+                            type="button"
+                            onClick={handleClose}
+                            className={`p-1 rounded ${payment.completedReceipt ? "text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-800" : "hover:bg-white/20"}`}
+                        >
                             <X size={20} />
                         </button>
                     )}
                 </div>
 
                 {payment.completedReceipt ? (
-                    <ReceiptOptions receipt={payment.completedReceipt} onNewSale={handleClose} />
+                    // Close and New Transaction both reset+close here (unlike legacy's
+                    // separate buttons) — this modal stays mounted across opens, so any
+                    // dismissal that doesn't reset completedReceipt would show this same
+                    // stale receipt again next time (see handleClose above).
+                    <ReceiptOptions receipt={payment.completedReceipt} onClose={handleClose} onNewSale={handleClose} />
                 ) : (
                     <>
                         <div className="grid sm:grid-cols-[7fr_5fr] gap-6 px-6 py-5">

@@ -8,6 +8,7 @@ import ConfirmDialog from "../../../components/ConfirmDialog";
 import useAuthStore from "../../authentication/stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
 import { usePayment } from "../../payment/hooks/usePayment";
+import { computeCartTotals } from "../../payment/services/paymentService";
 import { formatCurrency, formatAmount } from "../../../utils/currency";
 
 // "ZMW" pinned to the left of a fixed-min-width column, digits right-aligned
@@ -23,13 +24,6 @@ function AmountValue({ value, className = "" }) {
     );
 }
 
-// Product prices from the legacy API are tax-inclusive (price_ttc) and don't
-// carry a per-product tax rate yet, so the Subtotal/Tax split below is a flat
-// placeholder estimate until that data is available from the backend. Kept
-// in sync with the same constant in payment/services/paymentService.js,
-// which builds the actual payment line items in the payment modal.
-const TAX_RATE = 0.16;
-
 function CartPanel({ cart, onRemove, total, cashSessionOpen = true }) {
     const terminalConfig = useAuthStore((state) => state.terminalConfig);
     const terminalNumber = terminalConfig?.terminalNumber || 1;
@@ -42,8 +36,7 @@ function CartPanel({ cart, onRemove, total, cashSessionOpen = true }) {
     const [paymentOpen, setPaymentOpen] = useState(false);
     const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
     const itemCount = cart.reduce((sum, item) => sum + item.qty, 0);
-    const subtotalExcl = total / (1 + TAX_RATE);
-    const tax = total - subtotalExcl;
+    const { subtotalExcl, tax } = computeCartTotals(cart);
 
     return (
         <div className="w-[182px] sm:w-[250px] md:w-[361px] lg:w-[452px] h-full shrink-0 flex flex-col bg-white dark:bg-[#1e293b] border border-gray-100 dark:border-transparent rounded-xl sm:rounded-2xl shadow-sm px-1 sm:px-2 lg:px-2.5 text-gray-900 dark:text-white overflow-hidden">
@@ -171,13 +164,21 @@ function CartPanel({ cart, onRemove, total, cashSessionOpen = true }) {
             <div className="shrink-0 mt-1 sm:mt-1.5 pt-[3.6px] sm:pt-[5.4px] pb-1.5 sm:pb-2 px-2 sm:px-2.5 border-t border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/50 rounded-lg space-y-[1.8px] sm:space-y-[3.6px] text-[9px] sm:text-xs">
                 <div className="flex justify-between gap-1 text-gray-500 dark:text-slate-400">
                     <span className="truncate">Order Id</span>
-                    <span className="text-gray-700 dark:text-slate-300 truncate text-right">(PROV-POS{terminalNumber}-0)</span>
+                    <span className="text-gray-700 dark:text-slate-300 truncate text-right">
+                        {pendingInvoice?.ref || draftInvoice?.ref || `(PROV-POS${terminalNumber}-0)`}
+                    </span>
                 </div>
                 <div className="flex justify-between gap-1 items-center text-gray-500 dark:text-slate-400">
                     <span className="truncate">Status</span>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-amber-400 dark:bg-amber-500 text-amber-950 border border-amber-500 dark:border-amber-400">
-                        📝 Draft
-                    </span>
+                    {pendingInvoice || draftInvoice ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-amber-400 dark:bg-amber-500 text-amber-950 border border-amber-500 dark:border-amber-400">
+                            {pendingInvoice ? <><Clock size={9} /> Pending</> : <>📝 Draft</>}
+                        </span>
+                    ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-semibold bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-slate-300 border border-gray-300 dark:border-slate-600">
+                            New
+                        </span>
+                    )}
                 </div>
                 <div className="flex justify-between gap-1 text-gray-500 dark:text-slate-400">
                     <span className="truncate">Items</span>

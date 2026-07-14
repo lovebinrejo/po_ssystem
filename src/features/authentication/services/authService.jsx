@@ -22,7 +22,7 @@ import { getApiBaseUrl, isSameOriginBackend } from "../../../services/apiConfig"
 // session agree with `terminalConfig.terminalNumber` below.
 const establishLegacySession = async ({ email, password, masterEntity, terminalNumber }) => {
   try {
-    await fetch(`${getApiBaseUrl()}/takeposnew/index.php`, {
+    const response = await fetch(`${getApiBaseUrl()}/takeposnew/index.php`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       credentials: "same-origin",
@@ -34,8 +34,16 @@ const establishLegacySession = async ({ email, password, masterEntity, terminalN
         setterminal: String(terminalNumber || 1),
       }),
     });
-  } catch {
-    // Non-fatal, see comment above.
+    // Best-effort by design (see comment above) — this still isn't fatal to
+    // login either way — but silently swallowing every outcome made a real
+    // failure here indistinguishable from success, which is exactly what
+    // made the "Author missing in Reports" investigation so hard to pin
+    // down: reports_data.php/payment_summary.php depend on this succeeding,
+    // with nothing telling you it didn't. A console line costs nothing and
+    // turns that silent failure into something greppable.
+    console.info(`[legacy-session] establishLegacySession POST ${response.status} ${response.url}`);
+  } catch (err) {
+    console.warn("[legacy-session] establishLegacySession failed (non-fatal to login):", err.message);
   }
 };
 
@@ -65,6 +73,8 @@ export const loginUser = async ({ email, password, masterEntity }) => {
 
   if (isSameOriginBackend()) {
     await establishLegacySession({ email, password, masterEntity, terminalNumber: result.terminal_number });
+  } else {
+    console.info(`[legacy-session] skipped — isSameOriginBackend() is false (getApiBaseUrl="${getApiBaseUrl()}", page origin="${window.location.origin}")`);
   }
 
   return {
