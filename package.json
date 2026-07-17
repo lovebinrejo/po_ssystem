@@ -7,6 +7,8 @@
     "dev": "vite",
     "dev:prod": "vite --mode production",
     "dev:demo-proxy": "vite --mode demo-proxy",
+    "dev:wamp-proxy": "vite --mode wamp-proxy",
+    "dev:proxy": "vite --mode proxy",
     "build": "vite build",
     "build:htdocs": "vite build --mode htdocs",
     "lint": "eslint .",

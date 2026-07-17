@@ -1,13 +1,13 @@
 import { handleUnauthorized } from "./authGuard";
-import { getApiBaseUrl } from "./apiConfig";
+import { buildRequestUrl, dynamicProxyHeaders } from "./apiConfig";
 
-const buildUrl = (path) => `${getApiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+const buildUrl = (path) => buildRequestUrl(path.startsWith("/") ? path : `/${path}`);
 
 const authHeaders = () => {
     const token = localStorage.getItem("token");
     // The legacy api/pos/* endpoints authenticate via auth_helper.php's
     // authenticate_bearer_token(), which reads X-API-Key (not Authorization: Bearer).
-    return token ? { "X-API-Key": token } : {};
+    return { ...(token ? { "X-API-Key": token } : {}), ...dynamicProxyHeaders() };
 };
 
 // The server being unreachable (backend down, no network) throws a raw

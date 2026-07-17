@@ -1,3 +1,5 @@
+import ecuentaLogo from "../../../assets/Ecuenta_logo_png 1.png?inline";
+
 // Single source of truth for the printable receipt layout, mirroring legacy
 // takeposnew/receipt.php's actual design (navy-blue headings, dotted
 // dividers, styled "PAYMENT DETAILS" box, bold sans-serif type) rather than
@@ -6,14 +8,17 @@
 // "reprint" action from the POS screen itself) can reuse the exact same
 // template.
 //
-// Not at full parity with legacy: the receipt data this app fetches
-// doesn't carry the company logo file that legacy's own receipt.php pulls
-// directly from the database — omitted here rather than faked, since it's
-// not available to `pos_standalone` without a backend change, and
-// deliberately not substituted with this app's own "Ecuenta" platform
-// branding either — that would misrepresent a merchant's receipt (e.g.
-// Voxforem's) as carrying Ecuenta's own logo, which is wrong regardless of
-// data availability. Order Type/Table (order_type/table_label) ARE shown
+// Company logo: always this app's own bundled Ecuenta asset (a fixed
+// platform brand mark on every receipt, deliberate — see git history for
+// the earlier per-merchant-logo attempt via api/invoices/details.php,
+// dropped because most backends either had no real logo configured or
+// pointed at Dolibarr's nophoto.png placeholder/this exact same Ecuenta
+// asset uploaded as a stand-in). Bundled via Vite's `?inline` import so it's
+// embedded as a base64 data URI directly in the generated HTML string —
+// works unmodified whether that string ends up in the on-screen iframe's
+// srcDoc or a print popup's document.write(), neither of which reliably
+// resolves a root-relative asset URL back to this app's own origin.
+// Order Type/Table (order_type/table_label) ARE shown
 // when present, but only usePaymentBase.js's finalizePayment sets them —
 // captured client-side from tableStore at the moment a sale completes,
 // since the backend payment payload never persists either value onto the
@@ -107,6 +112,7 @@ const RECEIPT_STYLES = `
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: Arial, Helvetica, sans-serif; font-weight: bold; padding: 20px; max-width: 340px; margin: 0 auto; color: #1f2937; line-height: 1.3; }
     .center { text-align: center; }
+    .company-logo { max-width: 120px; max-height: 80px; margin: 0 auto 6px; display: block; }
     .company-name { font-size: 14px; font-weight: bold; color: #1e3a8a; text-transform: uppercase; letter-spacing: 0.5px; }
     .company-info { font-size: 11px; color: #333; }
     .welcome-text { font-size: 13px; font-weight: bold; text-align: center; color: #1e3a8a; margin: 6px 0; letter-spacing: 1px; }
@@ -158,6 +164,7 @@ export const buildReceiptHtml = (receipt, { thermalWidth = 80 } = {}) => {
             </head>
             <body>
                 <div class="center">
+                    <img class="company-logo" src="${ecuentaLogo}" alt="${esc(company.name)}" />
                     <div class="company-name">${esc(company.name)}</div>
                     ${company.address ? `<div class="company-info">${esc(company.address)}</div>` : ""}
                     ${company.zip || company.town ? `<div class="company-info">${esc(`${company.zip || ""} ${company.town || ""}`.trim())}</div>` : ""}

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import LoginForm from "./LoginForm";
 import { useLogin } from "../hooks/useLogin";
-import { getApiBaseUrl, setApiBaseUrl } from "../../../services/apiConfig";
+import { getApiBaseUrl, setApiBaseUrl, clearApiBaseUrl, getBackendUrlOverride } from "../../../services/apiConfig";
 import { clearCache } from "../../../services/posCache";
 import useAuthStore from "../stores/authStore";
 import SocialIcon from "../../../components/SocialIcon";
@@ -23,7 +23,11 @@ function Login() {
     // (e.g. a URL copied straight out of the legacy POS) without a rebuild.
     // Left blank, login proceeds against whatever this build was already
     // configured with (.env / .env.production / .env.htdocs).
-    const [backendUrl, setBackendUrl] = useState("");
+    // Prefilled from any existing override (not the resolved default —
+    // see getBackendUrlOverride's comment) so a stale override from a
+    // previous session/dev mode is visible instead of silently still
+    // active behind a form that looks blank.
+    const [backendUrl, setBackendUrl] = useState(() => getBackendUrlOverride());
     const navigate = useNavigate();
     const { login, error, loading } = useLogin();
     const logout = useAuthStore((state) => state.logout);
@@ -60,6 +64,17 @@ function Login() {
         } catch {
             // error is already captured by useLogin and rendered below
         }
+    };
+
+    // Same reasoning as the "actually switching backends" branch in
+    // handleLogin above — dropping the override without also dropping any
+    // token/cache from that backend would leave stale cross-backend state
+    // behind.
+    const handleResetBackend = () => {
+        clearApiBaseUrl();
+        setBackendUrl("");
+        logout();
+        clearCache();
     };
 
     return (
@@ -126,6 +141,7 @@ style={{
                         setMasterEntity={setMasterEntity}
                         setBackendUrl={setBackendUrl}
                         onLogin={handleLogin}
+                        onResetBackend={handleResetBackend}
                     />
 
                     {

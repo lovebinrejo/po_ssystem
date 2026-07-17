@@ -1,4 +1,5 @@
 import { post } from "../../../services/axios";
+import { getApiBaseUrl } from "../../../services/apiConfig";
 
 // Mirrors takeposnew/ajax/ajax.php's createInvoiceWithPayment via the clean
 // REST endpoint built for this app: api/pos/payment. See that file's PHPDoc
@@ -12,7 +13,39 @@ export const submitPayment = (payload) => post("/api/pos/payment/index.php", pay
 // submitCartAsDraft. Unlike submitPayment's deferred_payment flag, this
 // never decrements stock and the ref stays a (PROVxxx) placeholder until
 // the sale is actually paid later via submitPayment's existing_invoice_id.
-export const saveDraftInvoice = (payload) => post("/api/pos/draft/index.php", payload);
+//
+// This file isn't deployed on every backend (confirmed 404 on
+// demo.ecuenta.online, present on local WAMP — see this repo's own
+// backend-changes/README.md, tracked but never fully rolled out). Every
+// usePayment.js saveDraft call already falls back to submitPayment's
+// deferred_payment flag on failure — but on a backend missing this file,
+// that meant TWO full sequential round-trips to a real, possibly remote
+// server on every single Draft click (one guaranteed-404 attempt, then the
+// real fallback), which is exactly the "why does Draft take a moment" delay
+// reported live on demo.ecuenta.online — not present on local WAMP, where
+// this file exists and near-zero localhost latency hides the extra
+// round-trip anyway either way. A 404 here means "this backend's own copy
+// of the file doesn't have this endpoint at all," a fact about the
+// deployment that won't change on retry — so once observed for whichever
+// backend URL is currently configured, it's cached and skipped on every
+// later call, saving that wasted round-trip without hardcoding which URL
+// this applies to (switching backends via the login screen re-probes fresh,
+// same as a brand-new install would).
+const knownUnavailable = new Map();
+const DRAFT_ENDPOINT_MISSING_MESSAGE = "This feature isn't available on the currently configured server.";
+
+export const saveDraftInvoice = async (payload) => {
+    const backend = getApiBaseUrl();
+    if (knownUnavailable.get(backend)) {
+        throw new Error(DRAFT_ENDPOINT_MISSING_MESSAGE);
+    }
+    try {
+        return await post("/api/pos/draft/index.php", payload);
+    } catch (err) {
+        if (err.message === DRAFT_ENDPOINT_MISSING_MESSAGE) knownUnavailable.set(backend, true);
+        throw err;
+    }
+};
 
 // Fallback only — used for cart items that genuinely have no VAT rate of
 // their own (locked lines loaded from a Reports invoice via

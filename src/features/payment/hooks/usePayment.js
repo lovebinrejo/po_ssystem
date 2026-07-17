@@ -11,7 +11,7 @@ export function usePayment() {
     const selectedCustomer = usePosStore((state) => state.selectedCustomer);
     const {
         cart,
-        activePlace,
+        tablePlace,
         terminalNumber,
         socid,
         total,
@@ -77,7 +77,7 @@ export function usePayment() {
                 payment_method_code: methodCode,
                 payment_amount: amount,
                 terminal: terminalNumber,
-                place: parseInt(activePlace, 10) || 0,
+                place: tablePlace,
                 ...(settleInvoiceId ? { existing_invoice_id: settleInvoiceId } : {}),
             });
 
@@ -120,7 +120,7 @@ export function usePayment() {
                     socid,
                     lines: buildPaymentLines(cart),
                     terminal: terminalNumber,
-                    place: parseInt(activePlace, 10) || 0,
+                    place: tablePlace,
                 });
                 if (!res.success) throw new Error(res.error || "Failed to save draft");
             } catch (primaryErr) {
@@ -139,7 +139,7 @@ export function usePayment() {
                     payment_method_code: selectedMethod,
                     payment_amount: total,
                     terminal: terminalNumber,
-                    place: parseInt(activePlace, 10) || 0,
+                    place: tablePlace,
                     deferred_payment: true,
                 });
                 if (!res.success) {

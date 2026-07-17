@@ -1,5 +1,5 @@
 import { get, post } from "../../../services/axios";
-import { getApiBaseUrl, isSameOriginBackend } from "../../../services/apiConfig";
+import { isSameOriginBackend, buildRequestUrl, dynamicProxyHeaders } from "../../../services/apiConfig";
 
 // Mirrors legacy's customer_ajax.php (searchCustomers/getCustomerInfo), but
 // against the X-API-Key-authenticated api/customers endpoint instead of the
@@ -43,10 +43,10 @@ const createCustomerViaLegacy = async (payload) => {
         town: payload.town || "",
     });
 
-    const response = await fetch(`${getApiBaseUrl()}/takeposnew/api/customer.php?action=create`, {
+    const response = await fetch(buildRequestUrl("/takeposnew/api/customer.php?action=create"), {
         method: "POST",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        headers: { "Content-Type": "application/x-www-form-urlencoded", ...dynamicProxyHeaders() },
         body,
     });
 

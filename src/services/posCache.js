@@ -213,9 +213,27 @@ export const getCachedCategories = () => cache.categories;
 // per-key snapshots, always overwritten by the latest successful fetch.
 const receiptKey = (invoiceId) => `pos_cache_receipt_${invoiceId}`;
 const invoicesListKey = (dateFrom, dateTo) => `pos_cache_invoices_${dateFrom}_${dateTo}`;
+const orderMetaKey = (invoiceId) => `pos_cache_order_meta_${invoiceId}`;
 
 export const cacheReceipt = (invoiceId, receipt) => idbSet(receiptKey(invoiceId), receipt).catch(() => {});
 export const getCachedReceipt = (invoiceId) => idbGet(receiptKey(invoiceId)).catch(() => null);
+
+// Order Type/Table (dine-in vs pickup, which table) has nowhere to live on
+// the backend — confirmed live 2026-07-17 that no api/pos/* endpoint reads
+// or writes fk_transport_mode/place at all, unlike legacy's own
+// receipt.php, which persists both server-side (see [[legacy_dolibarr_pos_backend]]).
+// usePaymentBase.js's finalizePayment captures them from tableStore at the
+// exact moment a sale completes and writes them here — a small, permanent
+// (IndexedDB, not the receipt cache above's snapshot-of-one-fetch) local
+// record keyed by invoice ID. fetchReceipt reads this back on every future
+// fetch of that invoice, so a reprint from Reports later in the same
+// browser still shows them — real limitation: only ever populated for
+// sales actually completed in this app instance/browser, so an invoice
+// from another terminal, a different browser, or paid before this existed
+// still won't have it. That's the best available without touching the
+// backend (see [[pos_standalone_no_backend_changes]]).
+export const cacheOrderMeta = (invoiceId, meta) => idbSet(orderMetaKey(invoiceId), meta).catch(() => {});
+export const getCachedOrderMeta = (invoiceId) => idbGet(orderMetaKey(invoiceId)).catch(() => null);
 
 export const cacheInvoicesList = (dateFrom, dateTo, invoices) =>
     idbSet(invoicesListKey(dateFrom, dateTo), invoices).catch(() => {});

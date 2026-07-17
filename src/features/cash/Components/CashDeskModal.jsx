@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Landmark, User, X } from "lucide-react";
 import useAuthStore from "../../authentication/stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
-import { getActiveSession, getTheoreticalAmount, openSession, closeSession } from "../services/cashApi";
+import { getActiveSession, getSummary, getTheoreticalAmount, openSession, closeSession } from "../services/cashApi";
 
 // The backend returns date_creation as a naive "YYYY-MM-DD HH:MM:SS" string
 // (the server's MySQL/Dolibarr datetime, stored in UTC) with no timezone
@@ -38,7 +38,18 @@ const fetchCashDesk = async (terminal) => {
     const res = await getActiveSession(terminal);
     if (!res.success) throw new Error(res.error || "Failed to load cash session");
     if (res.session) {
-        return { session: res.session, summary: res.summary, theoreticalAmount: null };
+        // getActiveSession only ever returns the session row itself (id,
+        // opening, status, date_creation, user_name, terminal) — confirmed
+        // live 2026-07-17, no `summary` field at all, unlike what this used
+        // to assume. The actual sales-to-date breakdown (cash_sales,
+        // cheque_sales, card_sales, expected_amount) lives behind the
+        // separate getSummary action, which was exported from cashApi.js but
+        // never actually called anywhere — so this whole modal previously
+        // rendered a bare session card with no closing-reconciliation table
+        // at all, and closing a session silently submitted 0.00 for every
+        // amount instead of the real expected total.
+        const summaryRes = await getSummary(res.session.id, terminal);
+        return { session: res.session, summary: summaryRes.success ? summaryRes.summary : null, theoreticalAmount: null };
     }
     const theoRes = await getTheoreticalAmount(terminal);
     return {
@@ -174,8 +185,10 @@ function CashDeskModal({ open, onClose, onLogout }) {
                                         {session.status === 1 ? "Validated" : "Draft"}
                                     </span>
                                 </div>
-                                <Row label="Module/Application:" value={session.posmodule === "takepos" ? "Takepos" : session.posmodule} />
-                                <Row label="Terminal:" value={session.posnumber} />
+                                {session.posmodule && (
+                                    <Row label="Module/Application:" value={session.posmodule === "takepos" ? "Takepos" : session.posmodule} />
+                                )}
+                                <Row label="Terminal:" value={session.terminal} />
                                 <Row label="Period:" value={toPeriod(session.date_creation)} />
                                 <Row label="Creat. Date:" value={toCreationDateTime(session.date_creation)} />
                                 <Row label="Initial Balance - Cash:" value={`${session.opening.toFixed(2)} ZMW`} />
@@ -211,9 +224,9 @@ function CashDeskModal({ open, onClose, onLogout }) {
                                             <tr className="border-b border-gray-100 dark:border-slate-800">
                                                 <td className="px-3 py-2 font-medium">N° Of Invoices</td>
                                                 <td className="text-center px-2 py-2">-</td>
-                                                <td className="text-center px-2 py-2">{summary.cash_invoices}</td>
-                                                <td className="text-center px-2 py-2">{summary.cheque_invoices}</td>
-                                                <td className="text-center px-2 py-2">{summary.card_invoices}</td>
+                                                <td className="text-center px-2 py-2">{summary.cash_invoices ?? "-"}</td>
+                                                <td className="text-center px-2 py-2">{summary.cheque_invoices ?? "-"}</td>
+                                                <td className="text-center px-2 py-2">{summary.card_invoices ?? "-"}</td>
                                             </tr>
                                             <tr className="border-b border-gray-100 dark:border-slate-800">
                                                 <td className="px-3 py-2 font-medium">Theorical Amount</td>

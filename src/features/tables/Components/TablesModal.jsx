@@ -3,6 +3,7 @@ import { Check, Grid3x3, Pencil, Save, X } from "lucide-react";
 import { fetchFloorTables, saveTableStatuses, FLOOR_COUNT } from "../services/tableFloorApi";
 import { STATUS_META, STATUS_ORDER } from "../statusMeta";
 import useTableStore from "../stores/tableStore";
+import usePosStore from "../../pos/stores/posStore";
 import Toast from "../../../components/Toast";
 
 function TablesModal({ open, onClose }) {
@@ -14,6 +15,8 @@ function TablesModal({ open, onClose }) {
     const [savedToast, setSavedToast] = useState(false);
     const selectedTable = useTableStore((state) => state.selectedTable);
     const selectTable = useTableStore((state) => state.selectTable);
+    const clearCart = usePosStore((state) => state.clearCart);
+    const showToast = usePosStore((state) => state.showToast);
 
     useEffect(() => {
         if (!open) return;
@@ -41,9 +44,24 @@ function TablesModal({ open, onClose }) {
 
     if (!open) return null;
 
+    // Unlike the cart's own table selector (TableSelectorModal, backed by
+    // real invoices), this floor-plan view has no backend order data behind
+    // it yet (see tableFloorApi.js) — a "reserved"/"occupied" tile has no
+    // real order to resume. So every selectable status (everything except
+    // "disabled"/"maintenance", which genuinely mean out-of-service) still
+    // clears the cart and readies the table for a fresh order, same as
+    // picking an available one — clicking a pending/reserved table used to
+    // just do nothing (disabled), which looked broken.
     const handleSelectTable = (table) => {
-        if (table.status !== "available") return;
+        if (table.status === "disabled" || table.status === "maintenance") return;
+        clearCart();
         selectTable({ id: `floor${floor}-${table.id}`, label: table.label });
+        const statusLabel = STATUS_META[table.status]?.label;
+        showToast(
+            table.status === "available"
+                ? `${table.label} selected — ready for a new order`
+                : `${table.label} selected (${statusLabel}) — ready to add items`
+        );
         onClose();
     };
 
@@ -158,7 +176,8 @@ function TablesModal({ open, onClose }) {
                                     {tables.map((table) => {
                                         const effectiveStatus = pendingChanges[table.id] ?? table.status;
                                         const isDirty = table.id in pendingChanges;
-                                        const isSelectable = !editMode && effectiveStatus === "available";
+                                        const isSelectable =
+                                            !editMode && effectiveStatus !== "disabled" && effectiveStatus !== "maintenance";
                                         const isSelected = !editMode && selectedTable?.id === `floor${floor}-${table.id}`;
                                         const meta = STATUS_META[effectiveStatus] || STATUS_META.available;
                                         const StatusIcon = meta.icon;

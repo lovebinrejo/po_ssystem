@@ -22,6 +22,7 @@ import {
     HelpCircle,
     Eye,
     Ruler,
+    AlertTriangle,
 } from "lucide-react";
 import useAuthStore from "../../authentication/stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
@@ -296,9 +297,10 @@ function ReportsModal({ open, onClose }) {
             total_tva: acc.total_tva + e.total_tva,
             total_ttc: acc.total_ttc + e.total_ttc,
             pending: acc.pending + e.pending,
+            change: acc.change + e.change,
             received: acc.received + e.received,
         }),
-        { total_ht: 0, total_tva: 0, total_ttc: 0, pending: 0, received: 0 }
+        { total_ht: 0, total_tva: 0, total_ttc: 0, pending: 0, change: 0, received: 0 }
     );
 
     // Re-clamp the current page whenever the page size or filtered result count changes
@@ -399,6 +401,40 @@ function ReportsModal({ open, onClose }) {
     // invoice total, not the — already zero/negative — remaining balance),
     // producing a spurious extra payment and a nonsense "change" amount.
     const isSettleable = (entry) => entry.status !== "Abandoned" && entry.pending > 0;
+
+    // Flags a specific backend data-integrity bug (not a legacy behavior to
+    // mirror — this is a real corruption, confirmed live 2026-07-17): an
+    // intermittent "Unknown column 'cost_price'" SQL error during payment
+    // validation can leave an invoice's own total_ht/total_tva/total_ttc
+    // columns at 0 even though its line items are real and non-empty —
+    // confirmed by cross-checking the same invoice via api/invoices/index.php
+    // (which recomputes totals from line items), which showed real values
+    // (e.g. total_ttc: 116) for an invoice reports_data.php reported as all
+    // zeros. A genuine "Validated (Unpaid)"/"Paid"/"Classified Paid"/
+    // "Abandoned" invoice always has real totals — only a Draft can
+    // legitimately still be 0 (an empty cart never had a chance to total
+    // anything). No frontend fix can repair the underlying row — this is
+    // surfaced as a visible warning rather than the equally-wrong default
+    // (rendering it as if the zero total were trustworthy, e.g. showing
+    // "ZMW 0.00" as an ordinary paid-in-full amount).
+    const isDataIncomplete = (entry) => entry.status !== "Draft" && entry.total_ht === 0 && entry.total_tva === 0 && entry.total_ttc === 0;
+
+    // Deliberate departure from legacy here (confirmed live 2026-07-17 —
+    // legacy's own reports_data.php/pos-reports.js show the exact same thing):
+    // `payment_type` comes from the invoice's fk_mode_reglement field, which
+    // is a separate concept from whether a payment was actually ever
+    // recorded (paiement/paiement_facture) — Dolibarr can populate it from
+    // the customer's own default payment terms at validation time, even for
+    // an invoice with zero actual payments. A true Draft already correctly
+    // shows "Not Specified" (fk_mode_reglement is genuinely unset until
+    // validation), but a "Validated (Unpaid)" invoice showed "Cash" despite
+    // `received` being 0 — confusing on a real-world receipt/report, since
+    // it reads as "this was a cash sale" when no money has changed hands
+    // yet. Overridden here purely for display: any entry with nothing
+    // actually received shows "Not Specified" regardless of what
+    // fk_mode_reglement says, until a real payment exists to attribute a
+    // method to.
+    const displayPaymentType = (entry) => (entry.received === 0 ? "Not Specified" : entry.paymentType);
 
     const handleLoadInvoiceToCart = async (entry) => {
         if (loadingInvoiceId) return;
@@ -644,23 +680,44 @@ function ReportsModal({ open, onClose }) {
                                                         title={isSettleable(entry) ? "Click to load this invoice into the cart" : undefined}
                                                         className={`border-t border-gray-100 dark:border-slate-800 hover:bg-blue-50 dark:hover:bg-slate-800/60 ${
                                                             isSettleable(entry) ? "cursor-pointer" : ""
-                                                        } ${loadingInvoiceId === entry.id ? "opacity-50 pointer-events-none" : ""}`}
+                                                        } ${loadingInvoiceId === entry.id ? "opacity-50 pointer-events-none" : ""} ${
+                                                            isDataIncomplete(entry) ? "bg-red-50 dark:bg-red-500/10" : ""
+                                                        }`}
                                                     >
                                                         <td className="px-2.5 py-1 whitespace-nowrap">{entry.date}</td>
-                                                        <td className="px-2.5 py-1 font-semibold whitespace-nowrap">{entry.ref}</td>
+                                                        <td
+                                                            className={`px-2.5 py-1 font-semibold whitespace-nowrap ${
+                                                                entry.pending > 0 ? "text-blue-600 dark:text-blue-400" : ""
+                                                            }`}
+                                                        >
+                                                            {entry.pending > 0 && <CreditCard size={11} className="inline mr-1 -mt-0.5" />}
+                                                            {entry.ref}
+                                                        </td>
                                                         <td className="px-2.5 py-1 max-w-[90px] truncate">{entry.customer}</td>
-                                                        <td className="px-2.5 py-1 whitespace-nowrap">{entry.paymentType}</td>
+                                                        <td className="px-2.5 py-1 whitespace-nowrap">{displayPaymentType(entry)}</td>
                                                         <td className="px-2.5 py-1 text-right">{entry.total_ht.toFixed(2)}</td>
                                                         <td className="px-2.5 py-1 text-right">{entry.total_tva.toFixed(2)}</td>
                                                         <td className="px-2.5 py-1 text-right font-semibold">{entry.total_ttc.toFixed(2)}</td>
                                                         <td className={`px-2.5 py-1 text-right ${entry.pending > 0 ? "text-amber-500 font-semibold" : ""}`}>
                                                             {entry.pending.toFixed(2)}
                                                         </td>
-                                                        <td className="px-2.5 py-1 text-right">{entry.change.toFixed(2)}</td>
+                                                        <td className={`px-2.5 py-1 text-right ${entry.change > 0 ? "text-emerald-600 dark:text-emerald-400 font-semibold" : ""}`}>
+                                                            {entry.change.toFixed(2)}
+                                                        </td>
                                                         <td className="px-2.5 py-1 text-right">{entry.received.toFixed(2)}</td>
                                                         <td className="px-2.5 py-1 max-w-[80px] truncate">{entry.author}</td>
                                                         <td className="px-2.5 py-1 whitespace-nowrap">{entry.currency}</td>
-                                                        <td className="px-2.5 py-1 whitespace-nowrap">{entry.status}</td>
+                                                        <td className="px-2.5 py-1 whitespace-nowrap">
+                                                            {isDataIncomplete(entry) && (
+                                                                <span title="This invoice's totals are missing even though it's validated — a known backend bug (intermittent 'cost_price' SQL error during payment) left this record incomplete. The line items are real; the invoice's own total fields never saved. Not fixable from this app.">
+                                                                    <AlertTriangle
+                                                                        size={12}
+                                                                        className="inline mr-1 -mt-0.5 text-red-500"
+                                                                    />
+                                                                </span>
+                                                            )}
+                                                            {entry.status}
+                                                        </td>
                                                         <td className="px-2.5 py-1 text-center">
                                                             <button
                                                                 type="button"
@@ -693,7 +750,13 @@ function ReportsModal({ open, onClose }) {
                                                     <td className="text-right px-2.5 py-1">{displayTotals.total_tva.toFixed(2)}</td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.total_ttc.toFixed(2)}</td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.pending.toFixed(2)}</td>
-                                                    <td></td>
+                                                    <td
+                                                        className={`text-right px-2.5 py-1 ${
+                                                            displayTotals.change > 0 ? "text-emerald-600 dark:text-emerald-400" : ""
+                                                        }`}
+                                                    >
+                                                        {displayTotals.change.toFixed(2)}
+                                                    </td>
                                                     <td className="text-right px-2.5 py-1">{displayTotals.received.toFixed(2)}</td>
                                                     <td colSpan={4}></td>
                                                 </tr>

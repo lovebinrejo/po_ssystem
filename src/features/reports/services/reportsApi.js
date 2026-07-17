@@ -1,5 +1,5 @@
 import { get } from "../../../services/axios";
-import { getApiBaseUrl, isSameOriginBackend } from "../../../services/apiConfig";
+import { getApiBaseUrl, isSameOriginBackend, buildRequestUrl, dynamicProxyHeaders } from "../../../services/apiConfig";
 import { cacheInvoicesList, getCachedInvoicesList } from "../../../services/posCache";
 
 // api/pos/reports/index.php (a POS-scoped, payment-method-aware endpoint) isn't
@@ -34,8 +34,9 @@ const fetchLegacyReports = async ({ startDate, endDate, search }) => {
     });
     if (search) params.set("search", search);
 
-    const response = await fetch(`${getApiBaseUrl()}/takeposnew/api/reports_data.php?${params}`, {
+    const response = await fetch(buildRequestUrl(`/takeposnew/api/reports_data.php?${params}`), {
         credentials: "same-origin",
+        headers: dynamicProxyHeaders(),
     });
     let data;
     try {
@@ -103,8 +104,9 @@ export const getReportsInRange = async ({ startDate, endDate, search }) => {
 // falls through to summarizeInvoicePayments below.
 const fetchLegacyPaymentSummary = async () => {
     try {
-        const response = await fetch(`${getApiBaseUrl()}/takeposnew/api/payment_summary.php`, {
+        const response = await fetch(buildRequestUrl("/takeposnew/api/payment_summary.php"), {
             credentials: "same-origin",
+            headers: dynamicProxyHeaders(),
         });
         const data = await response.json();
         if (!data.success) return null;

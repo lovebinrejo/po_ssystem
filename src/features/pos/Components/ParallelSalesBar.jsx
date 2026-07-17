@@ -1,12 +1,18 @@
+import { useState } from "react";
 import { ShoppingCart, X } from "lucide-react";
 import usePosStore from "../stores/posStore";
+import CloseSaleDialog from "./CloseSaleDialog";
 
 function ParallelSalesBar() {
     const sales = usePosStore((state) => state.sales);
     const activePlace = usePosStore((state) => state.activePlace);
     const cartsByPlace = usePosStore((state) => state.cartsByPlace);
+    const pendingInvoicesByPlace = usePosStore((state) => state.pendingInvoicesByPlace);
+    const draftInvoicesByPlace = usePosStore((state) => state.draftInvoicesByPlace);
     const switchSale = usePosStore((state) => state.switchSale);
     const deleteSale = usePosStore((state) => state.deleteSale);
+    const showToast = usePosStore((state) => state.showToast);
+    const [confirmingSale, setConfirmingSale] = useState(null);
 
     // Mirrors legacy's row-reverse container: the newest sale renders
     // leftmost, pushing older ones further right (toward "New Sale").
@@ -27,7 +33,7 @@ function ParallelSalesBar() {
                         <button
                             type="button"
                             onClick={() => switchSale(sale.place)}
-                            title={`Sale started at ${sale.time}${itemCount > 0 ? ` - ${itemCount} items` : ""}`}
+                            title={`Sale started at ${sale.time}${itemCount > 0 ? ` - ${itemCount} item${itemCount === 1 ? "" : "s"}` : ""}`}
                             className={`flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium shadow cursor-pointer ${
                                 isActive ? "bg-[#2c6291] text-white font-semibold" : "bg-slate-700 text-white hover:bg-slate-600"
                             }`}
@@ -52,8 +58,10 @@ function ParallelSalesBar() {
                                 type="button"
                                 onClick={(e) => {
                                     e.stopPropagation();
-                                    if (itemCount === 0 || window.confirm("This sale has items. Cancel it anyway?")) {
+                                    if (itemCount === 0) {
                                         deleteSale(sale.place);
+                                    } else {
+                                        setConfirmingSale(sale);
                                     }
                                 }}
                                 title="Cancel sale"
@@ -65,6 +73,19 @@ function ParallelSalesBar() {
                     </div>
                 );
             })}
+
+            <CloseSaleDialog
+                sale={confirmingSale}
+                itemCount={confirmingSale ? (cartsByPlace[confirmingSale.place] || []).reduce((sum, item) => sum + item.qty, 0) : 0}
+                pendingInvoice={confirmingSale ? pendingInvoicesByPlace[confirmingSale.place] : null}
+                draftInvoice={confirmingSale ? draftInvoicesByPlace[confirmingSale.place] : null}
+                onCancel={() => setConfirmingSale(null)}
+                onClosed={(place) => {
+                    deleteSale(place);
+                    setConfirmingSale(null);
+                }}
+                showToast={showToast}
+            />
         </div>
     );
 }

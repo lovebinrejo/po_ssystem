@@ -32,20 +32,28 @@ function EditCartItemModal({ item, onClose, onSave, onRemove }) {
     const [reduceStock, setReduceStock] = useState(true);
     const [priceLocked, setPriceLocked] = useState(true);
     const [priceUnlocked, setPriceUnlocked] = useState(false);
-    const [unitPrice, setUnitPrice] = useState(0);
-    const [discountPercent, setDiscountPercent] = useState(0);
+    // Raw text the fields display, not the clamped number used for
+    // calculations — a plain numeric state snaps straight back to "0" the
+    // instant a backspace empties the field (parseFloat("") || 0 === the
+    // already-0 state, so React never sees a real change to re-render), so
+    // it looked like backspace "did nothing" on a value of 0. Keeping the
+    // literal typed string lets the box go genuinely empty mid-edit; the
+    // clamped number below is what everything else (calc, save) reads.
+    const [priceInput, setPriceInput] = useState("0");
+    const [discountInput, setDiscountInput] = useState("0");
     const [passcodePanelOpen, setPasscodePanelOpen] = useState(false);
     const [passcodeValue, setPasscodeValue] = useState("");
     const [passcodeError, setPasscodeError] = useState("");
     const [verifyingPasscode, setVerifyingPasscode] = useState(false);
     const [originalPrice, setOriginalPrice] = useState(0);
+    const priceInputRef = useRef(null);
 
     useEffect(() => {
         if (item) {
             setQty(item.qty);
-            setUnitPrice(item.price);
+            setPriceInput(String(item.price ?? 0));
             setOriginalPrice(item.price);
-            setDiscountPercent(item.discountPercent || 0);
+            setDiscountInput(String(item.discountPercent || 0));
             setReduceStock(item.reduceStock ?? true);
             setPriceLocked(passcodeEnabled);
             setPriceUnlocked(!passcodeEnabled);
@@ -86,6 +94,9 @@ function EditCartItemModal({ item, onClose, onSave, onRemove }) {
 
     if (!item) return null;
 
+    const unitPrice = Math.max(0, parseFloat(priceInput) || 0);
+    const discountPercent = Math.min(100, Math.max(0, parseFloat(discountInput) || 0));
+
     const subtotal = unitPrice * qty;
     const discountAmount = subtotal * (discountPercent / 100);
     const lineTotal = subtotal - discountAmount;
@@ -118,6 +129,11 @@ function EditCartItemModal({ item, onClose, onSave, onRemove }) {
                 setPriceLocked(false);
                 setPasscodePanelOpen(false);
                 setPasscodeValue("");
+                // Mirrors legacy's verifyPricePasscode(): focus + select the
+                // price field the instant it unlocks, so the cashier can
+                // retype it immediately instead of clicking in again.
+                priceInputRef.current?.focus();
+                priceInputRef.current?.select();
             } else {
                 setPasscodeError("Passcode is incorrect. Please try again.");
                 showToast("Passcode is incorrect. Please try again.", "error");
@@ -244,12 +260,26 @@ function EditCartItemModal({ item, onClose, onSave, onRemove }) {
                                 ZMW
                             </span>
                             <input
+                                ref={priceInputRef}
                                 type="number"
-                                value={unitPrice}
+                                step="0.01"
+                                min="0"
+                                inputMode="decimal"
+                                value={priceInput}
                                 readOnly={priceLocked}
                                 onClick={handlePriceFieldInteract}
-                                onFocus={handlePriceFieldInteract}
-                                onChange={(e) => setUnitPrice(parseFloat(e.target.value) || 0)}
+                                onFocus={(e) => {
+                                    handlePriceFieldInteract();
+                                    if (!priceLocked) e.target.select();
+                                }}
+                                // A plain click's mouseup normally collapses whatever
+                                // selection focus just made back down to a single
+                                // cursor position at the click point — preventing its
+                                // default here is what lets the select() above survive
+                                // a real mouse click, not just a keyboard-driven focus.
+                                onMouseUp={(e) => e.preventDefault()}
+                                onChange={(e) => setPriceInput(e.target.value)}
+                                onBlur={(e) => setPriceInput(String(Math.max(0, parseFloat(e.target.value) || 0)))}
                                 className={`flex-1 h-9 px-3 rounded-lg border outline-none focus:border-blue-500 ${
                                     priceLocked
                                         ? "cursor-pointer border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 text-gray-900 dark:text-white"
@@ -310,10 +340,15 @@ function EditCartItemModal({ item, onClose, onSave, onRemove }) {
                         <div className="flex items-center gap-2">
                             <input
                                 type="number"
+                                step="0.01"
                                 min="0"
                                 max="100"
-                                value={discountPercent}
-                                onChange={(e) => setDiscountPercent(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+                                placeholder="0.00"
+                                value={discountInput}
+                                onFocus={(e) => e.target.select()}
+                                onMouseUp={(e) => e.preventDefault()}
+                                onChange={(e) => setDiscountInput(e.target.value)}
+                                onBlur={(e) => setDiscountInput(String(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0))))}
                                 className="flex-1 h-9 px-3 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-900 dark:text-white outline-none focus:border-blue-500"
                             />
                             <span className="px-3 h-9 flex items-center rounded-lg border border-gray-300 dark:border-slate-600 text-sm text-gray-600 dark:text-slate-300">
@@ -340,29 +375,29 @@ function EditCartItemModal({ item, onClose, onSave, onRemove }) {
                     </div>
                 </div>
 
-                <div className="flex gap-1.5 px-5 py-3 border-t border-gray-200 dark:border-slate-700">
+                <div className="flex gap-1.5 px-5 py-2.5 border-t border-gray-200 dark:border-slate-700">
                     <button
                         type="button"
                         onClick={handleRemove}
-                        className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold text-white bg-red-500 hover:bg-red-600"
+                        className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-semibold text-white bg-red-500 hover:bg-red-600"
                     >
-                        <Trash2 size={14} />
+                        <Trash2 size={12} />
                         Remove Item
                     </button>
                     <button
                         type="button"
                         onClick={onClose}
-                        className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold text-gray-700 dark:text-white bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-600"
+                        className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-semibold text-gray-700 dark:text-white bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 hover:bg-gray-100 dark:hover:bg-slate-600"
                     >
-                        <X size={14} />
+                        <X size={12} />
                         Cancel
                     </button>
                     <button
                         type="button"
                         onClick={handleSave}
-                        className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-md text-sm font-semibold text-white bg-[#397db9] hover:bg-[#2c6291]"
+                        className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-semibold text-white bg-[#397db9] hover:bg-[#2c6291]"
                     >
-                        <Save size={14} />
+                        <Save size={12} />
                         Save Changes
                     </button>
                 </div>

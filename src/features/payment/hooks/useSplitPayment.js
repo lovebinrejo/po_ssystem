@@ -14,7 +14,7 @@ const newLine = (amount = "") => ({ id: nextLineId++, method: "01", amount });
 export function useSplitPayment() {
     const {
         cart,
-        activePlace,
+        tablePlace,
         terminalNumber,
         socid,
         total,
@@ -69,7 +69,7 @@ export function useSplitPayment() {
                     payment_method_code: line.method,
                     payment_amount: amount,
                     terminal: terminalNumber,
-                    place: parseInt(activePlace, 10) || 0,
+                    place: tablePlace,
                     ...(invoiceId ? { existing_invoice_id: invoiceId } : {}),
                 });
 

@@ -15,7 +15,8 @@ function LoginForm({
     setPassword,
     setMasterEntity,
     setBackendUrl,
-    onLogin
+    onLogin,
+    onResetBackend
 }) {
     const handleSubmit = (e) => {
         e.preventDefault();
@@ -59,8 +60,20 @@ function LoginForm({
                         icon={<Globe size={18} />}
                         className="bg-[#eef3f8] rounded-full"
                     />
-                    <p className="text-[11px] text-gray-400 mt-1 ml-3">
-                        Backend URL (optional) — a plain base URL works, or paste any legacy POS/API page URL and it's extracted automatically.
+                    <p className="text-[11px] mt-1 ml-3">
+                        {backendUrl ? (
+                            <span className="text-amber-600">
+                                Overriding this build's default backend —{" "}
+                                <button type="button" onClick={onResetBackend} className="underline hover:text-amber-700">
+                                    clear it
+                                </button>{" "}
+                                to use the default again.
+                            </span>
+                        ) : (
+                            <span className="text-gray-400">
+                                Backend URL (optional) — a plain base URL works, or paste any legacy POS/API page URL and it's extracted automatically.
+                            </span>
+                        )}
                     </p>
                 </div>
             </div>

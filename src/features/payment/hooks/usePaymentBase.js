@@ -3,12 +3,30 @@ import useAuthStore from "../../authentication/stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
 import useTableStore from "../../tables/stores/tableStore";
 import { fetchReceipt } from "../../reports/services/receiptApi";
+import { cacheOrderMeta } from "../../../services/posCache";
 
 // Cart/terminal wiring and submit-outcome handling shared by the
 // single-method flow (usePayment) and the multi-line flow (useSplitPayment).
 export function usePaymentBase() {
     const cart = usePosStore((state) => state.cart);
+    // Not the same `place` the backend means — activePlace is this app's
+    // parallel-sale slot index (see posStore.jsx's own comment: "0", "1",
+    // "2"... for concurrent carts), a pure frontend concept unrelated to any
+    // physical table. api/pos/payment/index.php and api/pos/draft/index.php
+    // both read their own `place` param straight into $invoice->floorid —
+    // confirmed live 2026-07-17 that this already works correctly server-side,
+    // it's just never been sent — see tablePlace below for the actual value
+    // that belongs there.
     const activePlace = usePosStore((state) => state.activePlace);
+    const orderType = useTableStore((state) => state.orderType);
+    const selectedTable = useTableStore((state) => state.selectedTable);
+    // The real physical-table id, only when dine-in with a table actually
+    // picked — 0 otherwise (pickup, or "On Table" selected but no specific
+    // table yet), matching legacy's own "place=0 or no place = pickup mode"
+    // convention (pos-table-selector.js). This is what makes a table
+    // actually show as occupied in tables.php?action=list afterward, and
+    // what TableSelectorModal's resume-existing-order flow depends on.
+    const tablePlace = orderType === "table" && selectedTable ? selectedTable.id : 0;
     const clearCart = usePosStore((state) => state.clearCart);
     const showToast = usePosStore((state) => state.showToast);
     const pendingInvoice = usePosStore((state) => state.pendingInvoice);
@@ -39,18 +57,21 @@ export function usePaymentBase() {
         // server-side. This app's api/pos/payment payload never sends either
         // value, so there's nothing to read back from a fetched invoice —
         // captured here instead, straight from tableStore, right at the
-        // moment this specific sale completes. Only meaningful for this
-        // just-finished receipt: a later reprint from Reports fetches the
-        // invoice fresh from the server and has no way to know what was
-        // selected for that historical sale, so it won't show these fields.
+        // moment this specific sale completes. Also written to posCache's
+        // small local order-meta record (see cacheOrderMeta) so a later
+        // reprint from Reports in this same browser can still show them —
+        // fetchReceipt reads it back automatically. Real limitation: an
+        // invoice from another terminal/browser, or paid before this
+        // existed, still has no such record and won't show these fields.
         const { orderType, selectedTable } = useTableStore.getState();
+        const orderMeta = { order_type: orderType, table_label: selectedTable?.label || null };
+        cacheOrderMeta(invoiceId, orderMeta);
         clearCart();
         showToast(`Payment successful — Invoice ${invoiceRef}`);
         const receipt = await fetchReceipt(invoiceId).catch(() => null);
         setCompletedReceipt({
             ...(receipt || { invoice_id: invoiceId, invoice_ref: invoiceRef }),
-            order_type: orderType,
-            table_label: selectedTable?.label || null,
+            ...orderMeta,
         });
     };
 
@@ -78,6 +99,7 @@ export function usePaymentBase() {
     return {
         cart,
         activePlace,
+        tablePlace,
         terminalConfig,
         terminalNumber,
         socid,
