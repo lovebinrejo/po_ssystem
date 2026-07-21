@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
     Banknote,
     CreditCard,
@@ -9,7 +10,15 @@ import {
     Settings,
 } from "lucide-react";
 import useAuthStore from "../../authentication/stores/authStore";
+import { fetchBankAccounts, fetchPaymentTypes } from "../services/paymentService";
 
+// code/icon stay fixed here — PaymentModal.jsx/usePayment.js branch on these
+// exact codes ("01" for cash, "06" for mobile money, etc.) to decide which
+// payment sub-form to show, so the code list itself can't be swapped for
+// whatever Dolibarr happens to have without touching that branching too.
+// The label is the part that actually comes from Dolibarr now (see
+// paymentTypeLabels below) — these strings are only the fallback shown
+// before that fetch resolves, or if it fails.
 export const PAYMENT_METHODS = [
     { code: "01", label: "Cash", icon: Banknote },
     { code: "02", label: "Credit", icon: CreditCard },
@@ -21,37 +30,96 @@ export const PAYMENT_METHODS = [
     { code: "08", label: "Bank transfer", icon: Landmark },
 ];
 
-// Mirrors legacy's takeposnew/index.php: a payment method is only usable if
-// this terminal has a bank account assigned to it (CASHDESK_ID_BANKACCOUNT_
-// {code}{terminal}), otherwise it's shown disabled with "Set up in module".
-// api/login's terminal_config.payment_methods (already returned on every
-// login, no extra fetch) only carries that check for 3 of the 8 codes today
-// — the other 4 non-mobile codes have no signal to go on here, so they
-// default to "needs setup" rather than optimistically enabling a method
-// that would likely 400 server-side anyway (api/pos/payment validates the
-// same constant on submit).
-const BANK_ACCOUNT_KEY = { "01": "cash", "04": "cheque", "05": "card" };
+// Mirrors takeposnew/index.php's own $standardPaymentMap — the actual PHP
+// that decides whether this button shows enabled on the legacy screen this
+// app is standing in for (verified live: 02/Credit checks CB, not a
+// "CREDIT" constant that doesn't exist; 03/Cash-Credit checks CHEQUE, not
+// "CASHCREDIT"; 04/05 have no named entry at all and fall straight to the
+// generic per-code constant, not CHEQUE/CB). Note this is a *different*
+// mapping than api/pos/payment/index.php's own $code_map, which the actual
+// payment submission uses — the two legacy files disagree with each other
+// for 02-05. This one is deliberately chosen to match what the cashier sees
+// as clickable; a mismatched submission at that point is a pre-existing
+// backend inconsistency, not something the frontend can paper over.
+const PRIMARY_BANK_ACCOUNT_KEY = { "01": "cash", "02": "card", "03": "cheque" };
 
-// Mobile money (06) is deliberately excluded from this check — it already
-// has its own real enable/disable gate via the LencoPay provider popup
-// (PaymentProviderModal, opened by PaymentModal's handleSelectMethod),
-// unrelated to bank-account configuration.
-const isConfigured = (code, terminalConfig) => {
-    if (code === "06") return true;
-    const key = BANK_ACCOUNT_KEY[code];
-    return key ? Boolean(terminalConfig?.payment_methods?.[key]) : false;
+const getBankAccountId = (code, terminalConfig) => {
+    const paymentMethods = terminalConfig?.payment_methods;
+    if (!paymentMethods) return null;
+    const primaryKey = PRIMARY_BANK_ACCOUNT_KEY[code];
+    return (primaryKey && paymentMethods[primaryKey]) || paymentMethods[code] || null;
+};
+
+export const isConfigured = (code, terminalConfig) => Boolean(getBankAccountId(code, terminalConfig));
+
+// Mirrors legacy's own pos-payment-integrated.js loadPaymentMethods(): renders
+// configured methods first (in their original relative order), then
+// unconfigured ones grouped at the end, instead of everything staying pinned
+// to PAYMENT_METHODS' fixed array order regardless of what's actually usable.
+export const orderPaymentMethods = (terminalConfig) => {
+    const configured = PAYMENT_METHODS.filter((m) => isConfigured(m.code, terminalConfig));
+    const unconfigured = PAYMENT_METHODS.filter((m) => !isConfigured(m.code, terminalConfig));
+    return [...configured, ...unconfigured];
+};
+
+// Mirrors legacy's auto-select-on-load (same file, ~line 199): prefer a
+// cash-like configured method (code "01"/"LIQ" or a label containing
+// "cash"/"espece"), else fall back to whichever configured method sorts
+// first — never a disabled one, since legacy's own selectPaymentMethod()
+// only ever runs against configuredMethods.
+export const pickDefaultPaymentMethod = (terminalConfig, paymentTypeLabels = {}) => {
+    const configured = PAYMENT_METHODS.filter((m) => isConfigured(m.code, terminalConfig));
+    if (configured.length === 0) return null;
+    const cashLike = configured.find((m) => {
+        const label = (paymentTypeLabels[m.code] ?? m.label).toLowerCase();
+        return m.code === "01" || label.includes("cash") || label.includes("espece");
+    });
+    return (cashLike || configured[0]).code;
 };
 
 function PaymentMethods({ selected, onSelect }) {
     const terminalConfig = useAuthStore((state) => state.terminalConfig);
+   
+    const [bankAccountsById, setBankAccountsById] = useState({});
+    
+    const [paymentTypeLabels, setPaymentTypeLabels] = useState({});
+
+    useEffect(() => {
+        fetchBankAccounts().then((accounts) => {
+            setBankAccountsById(Object.fromEntries(accounts.map((a) => [Number(a.id), a.label])));
+        });
+        fetchPaymentTypes().then((types) => {
+            setPaymentTypeLabels(Object.fromEntries(types.map((t) => [t.code, t.text])));
+        });
+    }, []);
+
+    
+    useEffect(() => {
+        console.table(
+            PAYMENT_METHODS.map(({ code, label }) => {
+                const bankAccountId = getBankAccountId(code, terminalConfig);
+                return {
+                    code,
+                    fallbackLabel: label,
+                    dolibarrLabel: paymentTypeLabels[code] ?? "(fetch pending/failed)",
+                    bankAccountId,
+                    bankAccountName: bankAccountId ? bankAccountsById[bankAccountId] ?? "(unknown)" : null,
+                    configured: isConfigured(code, terminalConfig),
+                };
+            })
+        );
+    }, [terminalConfig, bankAccountsById, paymentTypeLabels]);
 
     return (
         <div>
             <h3 className="text-sm font-medium text-gray-700 dark:text-slate-200 mb-3">Select Payment Method:</h3>
             <div className="grid grid-cols-3 gap-2">
-                {PAYMENT_METHODS.map(({ code, label, icon: Icon }) => {
+                {orderPaymentMethods(terminalConfig).map(({ code, label: fallbackLabel, icon: Icon }) => {
+                    const label = paymentTypeLabels[code] ?? fallbackLabel;
                     const configured = isConfigured(code, terminalConfig);
                     const active = configured && selected === code;
+                    const bankAccountId = getBankAccountId(code, terminalConfig);
+                    const bankName = bankAccountId ? bankAccountsById[bankAccountId] : null;
                     return (
                         <button
                             key={code}
@@ -67,7 +135,12 @@ function PaymentMethods({ selected, onSelect }) {
                             }`}
                         >
                             <Icon size={20} className={!configured ? "text-gray-400 dark:text-slate-500" : active ? "text-white" : "text-[#397db9]"} />
-                            {label}
+                            <span className="w-full truncate text-center px-1">{label}</span>
+                            {configured && bankName && (
+                                <span className={`text-[10px] font-normal truncate max-w-full ${active ? "text-white/80" : "text-gray-400 dark:text-slate-500"}`}>
+                                    {bankName}
+                                </span>
+                            )}
                             {!configured && (
                                 <span className="flex items-center gap-1 text-[10px] font-medium text-red-500 dark:text-red-400">
                                     <Settings size={10} /> Set up in module

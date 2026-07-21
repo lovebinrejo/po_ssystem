@@ -14,7 +14,7 @@ import { formatCurrency, formatAmount } from "../../../utils/currency";
 // "ZMW" pinned to the left of a fixed-min-width column, digits right-aligned
 // with tabular-nums — keeps the ZMW label in the same spot and the amounts'
 // last digit lined up down the column, regardless of how many digits each
-// row's number has (e.g. "9.66" vs "1,481.22").
+
 function AmountValue({ value, className = "" }) {
     return (
         <span className={`inline-flex items-baseline justify-between gap-1 min-w-[62px] sm:min-w-[72px] ${className}`}>
@@ -31,6 +31,7 @@ function CartPanel({ cart, onRemove, total, cashSessionOpen = true }) {
     const pendingInvoice = usePosStore((state) => state.pendingInvoice);
     const cancelPendingInvoice = usePosStore((state) => state.cancelPendingInvoice);
     const showToast = usePosStore((state) => state.showToast);
+    const checkoutBlockedReason = usePosStore((state) => state.checkoutBlockedReason);
     const { saveDraft, savingDraft, draftInvoice } = usePayment();
     const [editingItem, setEditingItem] = useState(null);
     const [paymentOpen, setPaymentOpen] = useState(false);
@@ -221,8 +222,9 @@ function CartPanel({ cart, onRemove, total, cashSessionOpen = true }) {
                 )}
                 <button
                     type="button"
-                    disabled={cart.length === 0 || !cashSessionOpen}
+                    disabled={cart.length === 0 || !cashSessionOpen || !!checkoutBlockedReason}
                     onClick={() => setPaymentOpen(true)}
+                    title={checkoutBlockedReason ? `Checkout unavailable: ${checkoutBlockedReason}` : undefined}
                     className="flex-1 flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl py-1.5 sm:py-2 px-3 sm:px-4 text-xs sm:text-sm font-semibold tracking-wide border border-transparent text-white bg-[#397db9] transition-all hover:bg-[#2c6291] active:scale-[0.98] disabled:bg-gray-100 disabled:border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed dark:disabled:bg-slate-800 dark:disabled:border-slate-600 dark:disabled:text-slate-500"
                 >
                     <Send size={14} className="sm:w-4 sm:h-4 shrink-0" />

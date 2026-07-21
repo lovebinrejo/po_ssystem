@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import usePosStore from "../../pos/stores/posStore";
 import { TAX_RATE, buildPaymentLines, computeCartTotals, submitPayment, saveDraftInvoice } from "../services/paymentService";
+import { saveLegacyDraftInvoice } from "../services/draftManageApi";
 import { openLencoWidget } from "../services/lencoService";
 import { usePaymentBase } from "./usePaymentBase";
 
-// Orchestrates the single-payment-method flow (everything except Split
-// Payment, which has its own hook for the sequential multi-call settlement).
+
 export function usePayment() {
     const hasHydrated = usePosStore((state) => state.hasHydrated);
     const selectedCustomer = usePosStore((state) => state.selectedCustomer);
@@ -94,14 +94,26 @@ export function usePayment() {
     const completePayment = () => settlePayment(selectedMethod, parseFloat(amountTendered) || 0);
 
     // Saves the current cart as a TRUE Dolibarr draft invoice (statut=0,
-    // never validated) via api/pos/draft — mirrors legacy's submitCartAsDraft
-    // (takeposnew/ajax/waiter_ajax.php). Stock is not decremented and the ref
-    // stays a (PROVxxx) placeholder until the sale is actually paid. The cart
-    // is deliberately left as-is (not cleared): the cashier keeps working the
+    // never validated). Stock is not decremented and the ref stays a
+    // (PROVxxx) placeholder until the sale is actually paid. The cart is
+    // deliberately left as-is (not cleared): the cashier keeps working the
     // same sale, cart items just flip to a "Pending" badge, and settlePayment
     // above reuses this invoice via existing_invoice_id when the cart hasn't
     // been touched since — that path already validates correctly at pay time
     // (api/pos/payment only validates `if ($invoice->statut == STATUS_DRAFT)`).
+    //
+    // Three-tier fallback, tried in order of "closest to a real draft":
+    //  1. takeposnew/ajax/ajax.php's saveDraft (same-origin only) — the
+    //     legacy TakePOS UI's own mechanism, confirmed live 2026-07-18 to
+    //     produce a genuine statut=0 draft. Preferred whenever available
+    //     since this app is normally deployed same-origin (see
+    //     [[pos_standalone_dynamic_proxy]]/htdocs build modes).
+    //  2. api/pos/draft/index.php — also a true draft, for whenever this app
+    //     is running cross-origin against a backend that happens to have
+    //     this file deployed (isn't deployed everywhere — see saveDraftInvoice).
+    //  3. api/pos/payment's deferred_payment flag — last resort, only ever
+    //     produces a validated-but-unpaid invoice (stock decremented, real
+    //     ref), never a true draft, but universally deployed.
     const saveDraft = async () => {
         if (cart.length === 0 || pendingInvoice || draftInvoiceId) return;
         // Reference snapshot: posStore's cart mutations always replace the
@@ -115,35 +127,47 @@ export function usePayment() {
             requireCustomer();
             let res;
             let usedFallback = false;
+            let staleSession = false;
             try {
-                res = await saveDraftInvoice({
-                    socid,
-                    lines: buildPaymentLines(cart),
+                res = await saveLegacyDraftInvoice({
+                    cart,
+                    customerId: socid,
                     terminal: terminalNumber,
                     place: tablePlace,
                 });
-                if (!res.success) throw new Error(res.error || "Failed to save draft");
-            } catch (primaryErr) {
-                // api/pos/draft/index.php isn't deployed on every backend
-                // (e.g. demo/demo1.ecuenta.online — confirmed 404 there,
-                // while api/pos/payment/index.php is confirmed present
-                // everywhere). Fall back to that universally-deployed
-                // endpoint's deferred_payment flag, which creates and
-                // validates the invoice but skips recording a payment —
-                // functionally a held sale, just validated (stock
-                // decremented, real ref) rather than a true statut=0 draft.
-                usedFallback = true;
-                res = await submitPayment({
-                    socid,
-                    lines: buildPaymentLines(cart),
-                    payment_method_code: selectedMethod,
-                    payment_amount: total,
-                    terminal: terminalNumber,
-                    place: tablePlace,
-                    deferred_payment: true,
-                });
-                if (!res.success) {
-                    throw new Error(res.error || primaryErr.message || "Failed to save draft", { cause: primaryErr });
+            } catch (legacyErr) {
+                staleSession = !!legacyErr.staleSession;
+                try {
+                    res = await saveDraftInvoice({
+                        socid,
+                        lines: buildPaymentLines(cart),
+                        terminal: terminalNumber,
+                        place: tablePlace,
+                    });
+                    if (!res.success) throw new Error(res.error || "Failed to save draft");
+                } catch (primaryErr) {
+                    // Neither true-draft path worked (not same-origin, this
+                    // backend doesn't have api/pos/draft/index.php either,
+                    // e.g. demo/demo1.ecuenta.online — confirmed 404 there,
+                    // while api/pos/payment/index.php is confirmed present
+                    // everywhere). Fall back to that universally-deployed
+                    // endpoint's deferred_payment flag, which creates and
+                    // validates the invoice but skips recording a payment —
+                    // functionally a held sale, just validated (stock
+                    // decremented, real ref) rather than a true statut=0 draft.
+                    usedFallback = true;
+                    res = await submitPayment({
+                        socid,
+                        lines: buildPaymentLines(cart),
+                        payment_method_code: selectedMethod,
+                        payment_amount: total,
+                        terminal: terminalNumber,
+                        place: tablePlace,
+                        deferred_payment: true,
+                    });
+                    if (!res.success) {
+                        throw new Error(res.error || primaryErr.message || "Failed to save draft", { cause: primaryErr });
+                    }
                 }
             }
 
@@ -151,7 +175,9 @@ export function usePayment() {
                 setDraftInvoice({ id: res.invoice_id, ref: res.invoice_ref });
                 showToast(
                     usedFallback
-                        ? `Draft saved — ${res.invoice_ref} (held as a validated invoice on this server)`
+                        ? staleSession
+                            ? `Draft saved — ${res.invoice_ref} (held as a validated invoice — your session expired, log out and back in to get real drafts again)`
+                            : `Draft saved — ${res.invoice_ref} (held as a validated invoice on this server)`
                         : `Draft saved successfully — ${res.invoice_ref}`
                 );
             } else {

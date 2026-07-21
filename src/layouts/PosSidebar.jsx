@@ -23,15 +23,12 @@ import ReportsModal from "../features/reports/Components/ReportsModal";
 import RoomsModal from "../features/tables/Components/RoomsModal";
 import TablesModal from "../features/tables/Components/TablesModal";
 import { getActiveSession } from "../features/cash/services/cashApi";
+import { fetchCurrentTerminalConfig } from "../features/authentication/services/authService";
 import usePosStore from "../features/pos/stores/posStore";
 import { initCache, refreshCache } from "../services/posCache";
 import { getApiBaseUrl } from "../services/apiConfig";
 
-// Mirrors legacy's sidebar tooltip behavior: a custom instant show/hide
-// tooltip instead of the native `title` attribute. Native title tooltips have
-// OS/browser-controlled appear/disappear timing (slow, inconsistent, can't be
-// tuned) — legacy explicitly strips `title` and builds its own body-level
-// tooltip shown on mouseenter and hidden on mouseleave for this reason.
+
 function NavIcon({ icon: Icon, badge, onClick, title, className = "", iconClassName = "", disabled = false }) {
     const [hovered, setHovered] = useState(false);
     const [tooltipTop, setTooltipTop] = useState(0);
@@ -81,6 +78,7 @@ function PosSidebar({ onLogout }) {
     const { theme, toggleTheme } = useTheme();
     const user = useAuthStore((state) => state.user);
     const terminalConfig = useAuthStore((state) => state.terminalConfig);
+    const setTerminalConfig = useAuthStore((state) => state.setTerminalConfig);
     const terminalNumber = terminalConfig?.terminalNumber ?? terminalConfig?.terminal_number ??1;
     const userTitle = user ? `${user.fullname || user.login}${user.admin ? " | Administrator" : ""}` : "User";
     const [cashDeskOpen, setCashDeskOpen] = useState(false);
@@ -93,9 +91,7 @@ function PosSidebar({ onLogout }) {
     const queryClient = useQueryClient();
     const [syncing, setSyncing] = useState(false);
 
-    // Mirrors legacy's cache system auto-loading on POS entry (pos-cache-integration.js
-    // initializeCacheSystem()): loads from localStorage if still fresh, else
-    // fetches products/customers/categories from the server once.
+    
     useEffect(() => {
         initCache().then(() => {
             queryClient.invalidateQueries({ queryKey: ["products"] });
@@ -104,8 +100,48 @@ function PosSidebar({ onLogout }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Mirrors legacy's syncCacheFromNav(): force a fresh pull of everything
-    // from the server, overwrite the cache, and refresh what's on screen.
+    
+    useEffect(() => {
+        let cancelled = false;
+        console.info("[terminal-config-refresh] fetching from api/general/index.php...");
+        fetchCurrentTerminalConfig()
+            .then((fresh) => {
+                console.info("[terminal-config-refresh] result:", fresh);
+                if (cancelled || !fresh) return;
+                setTerminalConfig({ ...useAuthStore.getState().terminalConfig, ...fresh });
+
+                
+                const posState = usePosStore.getState();
+                const current = posState.customersByPlace[posState.activePlace];
+                const activeCart = posState.cartsByPlace[posState.activePlace] || [];
+                if (current && fresh.defaultCustomerId && current.id !== fresh.defaultCustomerId) {
+                    if (activeCart.length === 0) {
+                        console.info("[terminal-config-refresh] active sale is empty — swapping in the new default customer in place", {
+                            activePlace: posState.activePlace,
+                            oldCustomer: current,
+                            newDefaultCustomerId: fresh.defaultCustomerId,
+                        });
+                        posState.setSelectedCustomer(null);
+                    } else {
+                        console.info("[terminal-config-refresh] active sale already has products — opening a new sale for the changed default", {
+                            activePlace: posState.activePlace,
+                            existingCustomer: current,
+                            newDefaultCustomerId: fresh.defaultCustomerId,
+                        });
+                        posState.createNewSale();
+                    }
+                }
+            })
+            .catch((err) => {
+                console.warn("[terminal-config-refresh] failed:", err.message);
+            });
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    
     const handleSyncCache = async () => {
         setSyncing(true);
         showToast("🔄 Syncing data from server...", "info");
@@ -123,10 +159,7 @@ function PosSidebar({ onLogout }) {
         }
     };
 
-    // Mirrors legacy takeposnew's pos-cash-manager.js: on entering the POS,
-    // check for an active cash session, lock down POS operations if none
-    // exists (see cashSessionOpen in posStore), and auto-prompt to open one
-    // (after a short delay) instead of waiting for a manual click.
+    
     useEffect(() => {
         let cancelled = false;
         getActiveSession(terminalNumber)
@@ -143,16 +176,13 @@ function PosSidebar({ onLogout }) {
             })
             .catch((err) => {
                 if (cancelled) return;
-                // Left uncaught, this silently leaves cashSessionOpen at its
-                // optimistic default (true) forever, so the POS looks fully
-                // operational even though nothing can actually reach the
-                // server — surface it instead of failing silently.
+                
                 showToast(err.message || "Unable to reach the server", "error");
             });
         return () => {
             cancelled = true;
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        
     }, []);
 
     return (

@@ -3,9 +3,7 @@ import { Info, CircleMinus, PackageSearch, CirclePlus, X, Tag, Package, Ruler, S
 import UOMSelectorModal from "./UOMSelectorModal";
 import { formatCurrency } from "../../../utils/currency";
 
-// Mirrors takeposnew/js/pos-app.js renderProductCard(): same palette, same
-// two-letter-initials rule, so a product not having a photo looks identical
-// to the legacy POS screen instead of an arbitrary placeholder.
+
 const AVATAR_COLORS = ["#F59E0B", "#85C1E2", "#EC4899", "#A78BFA", "#10B981", "#F472B6", "#60A5FA", "#34D399"];
 
 const getInitials = (name = "Product") => {
@@ -117,9 +115,7 @@ function ProductTile({ product, onAddToCart, onDecrement, onShowDetails }) {
     );
 }
 
-// Builds the cart-line product for a chosen unit: base unit keeps the
-// product's own id/name/price, alternate packaging (e.g. Bag) gets its own
-// cart line (distinct id) priced and labeled per that unit.
+
 const buildCartLine = (product, unit) =>
     unit.isBase
         ? product
@@ -139,10 +135,7 @@ const DETAIL_FIELDS = [
 ];
 
 // Same fields legacy's showProductDetails() modal shows (Reference/Stock/Unit),
-// restyled with a modern card layout instead of legacy's plain Bootstrap rows.
-// Skips the warehouse-by-warehouse stock breakdown legacy fetches separately,
-// and VAT code/description since those aren't part of the product shape
-// api/pos/products already returns.
+
 function ProductDetailsModal({ product, onClose }) {
     if (!product) return null;
 

@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, CreditCard, X } from "lucide-react";
 import { usePayment } from "./hooks/usePayment";
+import useAuthStore from "../authentication/stores/authStore";
 import PaymentSummary from "./Components/PaymentSummary";
 import ScanToPay from "./Components/ScanToPay";
-import PaymentMethods from "./Components/PaymentMethods";
+import PaymentMethods, { isConfigured, pickDefaultPaymentMethod } from "./Components/PaymentMethods";
 import CashPayment from "./Components/CashPayment";
 import CardPayment from "./Components/CardPayment";
 import MobilePayment from "./Components/MobilePayment";
@@ -18,24 +19,33 @@ function PaymentModal({ open, onClose }) {
 
     const payment = usePayment();
     const mode = payment.selectedMethod;
+    const terminalConfig = useAuthStore((state) => state.terminalConfig);
     const isLenco = mode === "06" && provider === "LencoPay";
+
+
+    useEffect(() => {
+        if (!open || isConfigured(mode, terminalConfig)) return;
+        const fallback = pickDefaultPaymentMethod(terminalConfig);
+        if (fallback) payment.setSelectedMethod(fallback);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, mode, terminalConfig]);
 
     const handleSelectMethod = (code) => {
         payment.setSelectedMethod(code);
         if (code === "06") setProviderModalOpen(true);
     };
 
+    
     const handleSelectProvider = (name) => {
         setProvider(name);
         setProviderModalOpen(false);
         payment.setSelectedMethod("06");
+        if (name === "LencoPay") payment.payViaLenco();
     };
 
     if (!open) return null;
 
-    // If a sale just completed, dismissing the modal (Cancel/X/New Sale)
-    // should clear that outcome — the modal stays mounted between opens, so
-    // without this the next sale would reopen straight to this old receipt.
+    
     const handleClose = () => {
         if (payment.completedReceipt) {
             payment.resetForNewSale();
@@ -46,7 +56,7 @@ function PaymentModal({ open, onClose }) {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-            <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto soft-scrollbar rounded-2xl bg-white dark:bg-slate-900 text-gray-900 dark:text-white shadow-2xl">
+            <div className="w-full max-w-[39.2rem] max-h-[85vh] overflow-y-auto soft-scrollbar rounded-2xl bg-white dark:bg-slate-900 text-gray-900 dark:text-white shadow-2xl">
                 <div
                     className={`flex items-center justify-between px-6 py-2.5 rounded-t-2xl ${
                         payment.completedReceipt
@@ -78,14 +88,16 @@ function PaymentModal({ open, onClose }) {
                 </div>
 
                 {payment.completedReceipt ? (
-                    // Close and New Transaction both reset+close here (unlike legacy's
-                    // separate buttons) — this modal stays mounted across opens, so any
-                    // dismissal that doesn't reset completedReceipt would show this same
-                    // stale receipt again next time (see handleClose above).
+                    
                     <ReceiptOptions receipt={payment.completedReceipt} onClose={handleClose} onNewSale={handleClose} />
                 ) : (
                     <>
-                        <div className="grid sm:grid-cols-[7fr_5fr] gap-6 px-6 py-5">
+                        {/* md: not sm: — at this modal's reduced width, splitting into
+                        two columns as early as 640px squeezes PaymentMethods' 3-column
+                        button grid into roughly a third of that, before it's actually
+                        wide enough to hold 3 legible buttons; staying single-column
+                        (full width) until 768px keeps every button readable. */}
+                        <div className="grid md:grid-cols-[7fr_5fr] gap-6 px-6 py-5">
                             <div>
                                 <PaymentMethods selected={mode} onSelect={handleSelectMethod} />
                                 {mode === "01" && (

@@ -1,12 +1,6 @@
 import { Globe, X, CreditCard } from "lucide-react";
 
-// Mirrors legacy's showOnlinePaymentPopup() — only LencoPay is ever actually
-// enabled there (Revolut/Airtel Money exist in the code but commented out),
-// so that's the only provider listed here too. UI only: picking a provider
-// just records the choice and continues to the normal Mobile Money confirm
-// panel — the real LencoPay gateway/charging integration isn't wired up
-// (flagged in MobilePayment.jsx), so this doesn't claim to actually charge
-// anything via LencoPay yet.
+ 
 function PaymentProviderModal({ open, onClose, onSelect }) {
     if (!open) return null;
 

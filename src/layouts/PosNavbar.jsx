@@ -1,8 +1,9 @@
 import { useState, useCallback } from "react";
-import { Menu, Search, ScanBarcode, ShoppingCart, Grid3x3 } from "lucide-react";
+import { Menu, Search, ScanBarcode, ShoppingCart } from "lucide-react";
 import usePosStore from "../features/pos/stores/posStore";
 import ParallelSalesBar from "../features/pos/Components/ParallelSalesBar";
 import { BarcodeScannerModal } from "../features/barcodeScanner";
+import logo from "../assets/Ecuenta_white-logo_png.png";
 
 function PosNavbar({ onToggleSidebar, onOpenCart }) {
     const searchTerm = usePosStore((state) => state.searchTerm);
@@ -31,8 +32,8 @@ function PosNavbar({ onToggleSidebar, onOpenCart }) {
             </button>
 
             <div className="flex items-center gap-1.5 text-white font-bold tracking-wide shrink-0">
-                <Grid3x3 size={18} />
-                <span>ECUENTA</span>
+                <img src={logo} alt="Ecuenta" className="w-[120px] h-[80px] object-contain" />
+                {/* <span className="text-lg">ECUENTA</span> */}
             </div>
 
             <div className="flex-1 flex items-center gap-2 max-w-xs bg-white rounded-lg px-3 py-1.5">
@@ -63,7 +64,7 @@ function PosNavbar({ onToggleSidebar, onOpenCart }) {
                     title="Start a new parallel sale"
                     className="flex items-center gap-1.5 px-3 h-8 rounded-lg bg-[#397db9] text-white text-sm font-semibold hover:bg-[#2c6291]"
                 >
-                    <ShoppingCart size={14} />
+                    <ShoppingCart size={23} />
                     New Sale
                 </button>
 

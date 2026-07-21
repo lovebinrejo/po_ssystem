@@ -1,8 +1,6 @@
 import { QrCode } from "lucide-react";
 
-// Legacy shows this static "Scan to Pay" placeholder in the right column at
-// all times, regardless of which payment method is selected on the left —
-// not conditional on Mobile Money specifically.
+
 function ScanToPay() {
     return (
         <div>

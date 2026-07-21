@@ -1,6 +1,4 @@
-// Shared card shell (header + bordered "Total Amount" row) used by every
-// payment-method panel — CardPayment, CashPayment, MobilePayment and
-// SplitPayment only differ in what they render below the total.
+
 function PaymentDetailsPanel({
     title = "Payment Details:",
     titleClassName = "text-sm font-medium text-gray-700 dark:text-slate-200 mt-5 mb-2",

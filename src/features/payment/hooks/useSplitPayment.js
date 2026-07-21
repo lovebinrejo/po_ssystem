@@ -5,12 +5,7 @@ import { usePaymentBase } from "./usePaymentBase";
 let nextLineId = 1;
 const newLine = (amount = "") => ({ id: nextLineId++, method: "01", amount });
 
-// Settles one sale across multiple payment methods by calling api/pos/payment
-// sequentially — the endpoint only accepts one method/amount per call, but it
-// does support adding another payment to an already-created invoice via
-// existing_invoice_id, which is what lets this work with zero backend changes:
-//   1st line: no existing_invoice_id  -> creates the invoice + records payment 1
-//   2nd..nth line: existing_invoice_id -> adds payment N to that same invoice
+
 export function useSplitPayment() {
     const {
         cart,

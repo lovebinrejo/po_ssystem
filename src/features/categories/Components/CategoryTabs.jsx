@@ -48,7 +48,7 @@ function CategoryTabs({ categories, selectedCategory, onSelect }) {
         const handleClickOutside = (e) => {
             if (moreRef.current && !moreRef.current.contains(e.target)) {
                 setDropdownOpen(false);
-            }
+            }   
         };
         document.addEventListener("mousedown", handleClickOutside);
         return () => document.removeEventListener("mousedown", handleClickOutside);

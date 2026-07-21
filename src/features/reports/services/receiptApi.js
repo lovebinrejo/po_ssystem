@@ -1,3 +1,4 @@
+import QRCode from "qrcode";
 import { get } from "../../../services/axios";
 import { cacheReceipt, getCachedReceipt, getCachedOrderMeta } from "../../../services/posCache";
 import { fetchInvoiceDetail } from "./reportsApi";
@@ -91,6 +92,31 @@ const fetchCompanyBranding = async (invoiceId) => {
     }
 };
 
+// The backend's zra_sdc block only ever carries qr_code_url — a ZRA
+// verification LINK, not an image (see details.php's `'qr_code_url' =>
+// $data['qrCodeUrl']`). Rendering that as a scannable QR code used to mean
+// InvoiceReceipt.jsx hardcoding a call to a public third-party QR-rendering
+// API (api.qrserver.com) at render time — every receipt print/preview
+// leaked the invoice's verification URL to that external service, and
+// receipts couldn't render offline. Generating the QR code image locally
+// (via the `qrcode` package) removes both problems: no third-party network
+// call, and it works with no network at all once this data URI is cached
+// alongside the rest of the receipt. Done once here at fetch time (not in
+// InvoiceReceipt.jsx) so buildReceiptHtml/printReceipt can stay synchronous —
+// they're called directly from JSX (srcDoc={buildReceiptHtml(...)}) and from
+// a print popup's document.write(), neither of which can await anything.
+// Best-effort: a QR-generation failure just means InvoiceReceipt.jsx's
+// existing "no qr_code_url -> no QR section" fallback applies, not a broken receipt.
+const withQrDataUri = async (zra) => {
+    if (!zra?.qr_code_url) return zra;
+    try {
+        const qr_data_uri = await QRCode.toDataURL(zra.qr_code_url, { width: 200, margin: 1 });
+        return { ...zra, qr_data_uri };
+    } catch {
+        return zra;
+    }
+};
+
 // api/pos/receipt/index.php returns full invoice detail (company, customer,
 // line items, payments) needed to render a real receipt — distinct from the
 // reports list endpoint, which only has one summary row per invoice.
@@ -143,11 +169,11 @@ export const fetchReceipt = async (invoiceId) => {
     }
 
     const [branding, orderMeta] = await Promise.all([brandingPromise, orderMetaPromise]);
+    const zraSdc = receipt.zra_sdc || branding?.zra_sdc || null;
     const finalReceipt = {
         ...receipt,
-        ...(branding
-            ? { company: { ...branding.company, ...receipt.company }, zra_sdc: receipt.zra_sdc || branding.zra_sdc }
-            : {}),
+        ...(branding ? { company: { ...branding.company, ...receipt.company } } : {}),
+        ...(zraSdc ? { zra_sdc: await withQrDataUri(zraSdc) } : {}),
         ...(orderMeta || {}),
     };
     cacheReceipt(invoiceId, finalReceipt);

@@ -13,11 +13,6 @@ const EMPTY_FORM = {
     vatUsed: "1",
 };
 
-// Mirrors legacy's "Create New Customer" offcanvas form (takeposnew/index.php
-// #insert_thirdparty): same fields and same client-side validation rules
-// (TPIN exactly 10 digits, valid email, phone >= 9 digits if provided), even
-// though the X-API-Key api/customers?action=create endpoint this posts to is
-// more lenient server-side than legacy's takeposnew/api/customer.php.
 function AddCustomerModal({ open, onClose, onCreated }) {
     const [form, setForm] = useState(EMPTY_FORM);
     const [error, setError] = useState("");
@@ -59,10 +54,7 @@ function AddCustomerModal({ open, onClose, onCreated }) {
                 town: form.town.trim(),
             };
             const customer = await createCustomer(payload);
-            // The create response only echoes id/name/email/phone/code_client
-            // (unlike list/detail's fuller row) — merge in what we know was
-            // actually submitted and saved, so the info card isn't missing
-            // fields like TPIN right after creation.
+            
             onCreated({ ...payload, ...customer });
             setForm(EMPTY_FORM);
         } catch (err) {

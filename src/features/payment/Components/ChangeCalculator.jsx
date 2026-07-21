@@ -1,6 +1,4 @@
-// Mirrors legacy's calculateChange(): compares tendered vs total and shows a
-// green "Change" banner (overpaid) or red "Balance Payable" banner
-// (underpaid). Renders nothing on an exact match, same as legacy.
+
 function ChangeCalculator({ total, tendered }) {
     const diff = (parseFloat(tendered) || 0) - total;
 

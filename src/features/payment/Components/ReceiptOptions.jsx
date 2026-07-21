@@ -1,16 +1,6 @@
 import { Printer, X, ShoppingCart } from "lucide-react";
 import { buildReceiptHtml, printReceipt } from "../../reports/Components/InvoiceReceipt";
 
-// Shown once a payment has been completed. Reuses the exact same receipt
-// template ReportsModal's reprint action uses (buildReceiptHtml/printReceipt
-// in reports/Components/InvoiceReceipt.jsx) so the preview here is pixel for
-// pixel what actually gets printed — one template, no duplicated markup.
-// The title bar (legacy: check-circle icon + "Payment Successful - Receipt")
-// lives in PaymentModal.jsx's own header instead of here, since that header
-// already renders unconditionally above this component — a second one here
-// would just duplicate it. Footer button layout mirrors legacy's own
-// post-payment modal (pos-payment-integrated.js's createReceiptModalIframe):
-// Print Receipt on the left, Close + New Transaction on the right.
 function ReceiptOptions({ receipt, onClose, onNewSale }) {
     const html = buildReceiptHtml(receipt);
 

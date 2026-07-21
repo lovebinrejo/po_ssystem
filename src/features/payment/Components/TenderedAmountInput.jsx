@@ -1,13 +1,7 @@
 import { useState } from "react";
 import ChangeCalculator from "./ChangeCalculator";
 
-// Cashier-entered tendered amount + change/balance banner, shared by every
-// single-method payment screen (Cash, Card, Mobile). Mirrors legacy's
-// calculateChange(), which is bound to the amount input's 'input' event — it
-// only ever runs in response to the cashier actually typing, never on the
-// field's pre-filled default value (setting .value programmatically doesn't
-// fire 'input'). hasEdited tracks that same distinction here, so the banner
-// stays hidden until there's a real edit.
+
 function TenderedAmountInput({ total, amountTendered, setAmountTendered }) {
     const [hasEdited, setHasEdited] = useState(false);
 

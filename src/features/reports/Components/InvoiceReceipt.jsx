@@ -8,16 +8,22 @@ import ecuentaLogo from "../../../assets/Ecuenta_logo_png 1.png?inline";
 // "reprint" action from the POS screen itself) can reuse the exact same
 // template.
 //
-// Company logo: always this app's own bundled Ecuenta asset (a fixed
-// platform brand mark on every receipt, deliberate — see git history for
-// the earlier per-merchant-logo attempt via api/invoices/details.php,
-// dropped because most backends either had no real logo configured or
-// pointed at Dolibarr's nophoto.png placeholder/this exact same Ecuenta
-// asset uploaded as a stand-in). Bundled via Vite's `?inline` import so it's
-// embedded as a base64 data URI directly in the generated HTML string —
-// works unmodified whether that string ends up in the on-screen iframe's
-// srcDoc or a print popup's document.write(), neither of which reliably
-// resolves a root-relative asset URL back to this app's own origin.
+// Company logo: real per-merchant logo from the backend (api/invoices/
+// details.php's company.logo, built from Dolibarr's MAIN_INFO_SOCIETE_LOGO,
+// confirmed live to genuinely differ per entity — e.g. entity 16 has
+// "voxforem-trading1.png", entity 18 has "voxforem.jpg") when the backend
+// actually has one configured, falling back to this app's own bundled
+// Ecuenta asset only when it doesn't (no MAIN_INFO_SOCIETE_LOGO set at all,
+// or it resolves to Dolibarr's own "nophoto.png" placeholder — confirmed
+// some entities, e.g. entity 1 on this exact instance, have
+// MAIN_INFO_SOCIETE_LOGO literally set to this project's own generic
+// Ecuenta logo, in which case using the backend URL vs. the bundled one
+// makes no visible difference anyway). See logoImgHtml below. The bundled
+// asset is still imported via Vite's `?inline` so it's embedded as a base64
+// data URI directly in the generated HTML string — works unmodified whether
+// that string ends up in the on-screen iframe's srcDoc or a print popup's
+// document.write(), neither of which reliably resolves a root-relative asset
+// URL back to this app's own origin.
 // Order Type/Table (order_type/table_label) ARE shown
 // when present, but only usePaymentBase.js's finalizePayment sets them —
 // captured client-side from tableStore at the moment a sale completes,
@@ -35,6 +41,24 @@ import ecuentaLogo from "../../../assets/Ecuenta_logo_png 1.png?inline";
 // ZRA-uploaded — only reachable via the fallback path today.
 const esc = (v) =>
     String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// nophoto.png is Dolibarr's own generic "no image set" placeholder — a
+// company.logo URL resolving to it means MAIN_INFO_SOCIETE_LOGO isn't really
+// configured, not a real per-merchant logo, so it's treated the same as no
+// logo at all. `onerror` covers every other real-world failure mode a plain
+// filename check can't (the file deleted from disk after the const was set,
+// the logo host unreachable, a cross-origin logo URL blocked by the
+// receiving page's CSP, etc.) — falls back to the bundled asset at runtime
+// instead of a broken-image icon on a printed receipt.
+const hasRealLogo = (company) => Boolean(company?.logo) && !/nophoto\.png/i.test(company.logo);
+
+const logoImgHtml = (company) => {
+    const alt = esc(company?.name);
+    if (hasRealLogo(company)) {
+        return `<img class="company-logo" src="${esc(company.logo)}" alt="${alt}" onerror="this.onerror=null;this.src='${ecuentaLogo}';" />`;
+    }
+    return `<img class="company-logo" src="${ecuentaLogo}" alt="${alt}" />`;
+};
 
 const fmt = (n) => Number(n ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -74,12 +98,15 @@ const paymentRowHtml = (payment, currency) => `
     </div>
 `;
 
-// Mirrors legacy's receipt.php SDC INFORMATION block. The QR image itself
-// is generated from qr_code_url (a ZRA verification link, not an image) via
-// a public QR-rendering API — this is exactly legacy's own fallback method
-// when its local phpqrcode library isn't available (it tries that first,
-// then Google Charts, then this same qrserver.com endpoint) — not a new
-// third-party dependency this project introduced.
+// Mirrors legacy's receipt.php SDC INFORMATION block. The backend's
+// qr_code_url is a ZRA verification LINK, not an image — qr_data_uri
+// (generated once, client-side, at fetch time via receiptApi.js's
+// withQrDataUri) is the actual scannable PNG. No third-party QR-rendering
+// API call happens here anymore: legacy's own fallback chain for the same
+// problem (its local phpqrcode library, then Google Charts, then a public
+// qrserver.com endpoint) leaked the invoice's verification URL to whichever
+// external service it fell through to; generating the code locally instead
+// avoids that entirely and lets a receipt render fully offline once cached.
 const sdcInfoRow = (label, value) => (value ? `<div>${esc(label)} : ${esc(value)}</div>` : "");
 
 const zraSdcHtml = (zra) => {
@@ -97,10 +124,10 @@ const zraSdcHtml = (zra) => {
             ${sdcInfoRow("Date", zra.date)}
         </div>
         ${
-            zra.qr_code_url
+            zra.qr_data_uri
                 ? `<div class="zra-qr">
                        <div class="qr-code-label">Scan to Verify Invoice</div>
-                       <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(zra.qr_code_url)}" alt="ZRA QR Code" />
+                       <img src="${zra.qr_data_uri}" alt="ZRA QR Code" />
                    </div>`
                 : ""
         }
@@ -164,7 +191,7 @@ export const buildReceiptHtml = (receipt, { thermalWidth = 80 } = {}) => {
             </head>
             <body>
                 <div class="center">
-                    <img class="company-logo" src="${ecuentaLogo}" alt="${esc(company.name)}" />
+                    ${logoImgHtml(company)}
                     <div class="company-name">${esc(company.name)}</div>
                     ${company.address ? `<div class="company-info">${esc(company.address)}</div>` : ""}
                     ${company.zip || company.town ? `<div class="company-info">${esc(`${company.zip || ""} ${company.town || ""}`.trim())}</div>` : ""}

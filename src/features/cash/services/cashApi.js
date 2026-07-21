@@ -8,10 +8,7 @@ const authHeaders = () => {
     return token ? { "X-API-Key": token } : {};
 };
 
-// Mirrors services/axios.js's fix: fetch() itself throws a raw "Failed to
-// fetch" TypeError when the server is unreachable, before any response
-// exists — convert it to a message a cashier can actually act on instead of
-// letting the literal technical string reach the UI.
+
 const CONNECTION_ERROR_MESSAGE = "Unable to connect to the server. Please check your network connection and try again.";
 
 const get = async (params) => {

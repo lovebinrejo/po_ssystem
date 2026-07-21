@@ -5,15 +5,6 @@ import useAuthStore from "../../authentication/stores/authStore";
 import usePosStore from "../../pos/stores/posStore";
 import { getActiveSession, getSummary, getTheoreticalAmount, openSession, closeSession } from "../services/cashApi";
 
-// The backend returns date_creation as a naive "YYYY-MM-DD HH:MM:SS" string
-// (the server's MySQL/Dolibarr datetime, stored in UTC) with no timezone
-// marker. `new Date()` on a string with no "Z"/offset assumes it's already in
-// the BROWSER's local time, so without explicitly marking it UTC here, the
-// raw UTC value gets mislabeled as local time instead of being converted —
-// e.g. showing "10:49" when the real local time is "16:19". Legacy avoids
-// this by using a Unix timestamp instead (unambiguous), which is what this
-// mirrors: parse as UTC, then let toLocaleString()/toLocaleDateString()
-// correctly convert to the browser's local timezone for display.
 const toUtcDate = (dateCreation) => {
     if (!dateCreation) return null;
     let normalized = String(dateCreation).includes("T") ? dateCreation : String(dateCreation).replace(" ", "T");

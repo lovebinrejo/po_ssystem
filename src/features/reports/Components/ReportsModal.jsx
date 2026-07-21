@@ -56,7 +56,14 @@ const formatInvoiceDate = (raw) => {
 const compareEntries = (a, b, field, dir) => {
     let result;
     if (field === "date") {
-        result = parseDisplayDate(a.date) - parseDisplayDate(b.date);
+        // entry.date only carries day granularity (no time), so two invoices
+        // created the same day compare equal here and would otherwise fall
+        // back to whatever order the backend query happened to return them
+        // in — not guaranteed to be true creation order. `id` is Dolibarr's
+        // own auto-increment invoice rowid, so a higher id always means it
+        // was created later regardless of ref-string formatting or same-day
+        // ties — a reliable "most recent first" tiebreaker.
+        result = parseDisplayDate(a.date) - parseDisplayDate(b.date) || a.id - b.id;
     } else if (typeof a[field] === "number") {
         result = a[field] - b[field];
     } else {
@@ -138,6 +145,33 @@ const mapInvoiceToEntry = (inv) => {
     };
 };
 
+// Both entries sources below can include Draft invoices that were never
+// actually completed — reports_data.php's own SQL has no status filter at
+// all (unlike its sibling payment_summary.php, which excludes them via
+// "AND f.fk_statut >= 1"), and isPosInvoice's client-side heuristic
+// (reportsApi.js) explicitly treats any Draft as a POS invoice for the same
+// reason. Confirmed live 2026-07-17: 6 real drafts worth ZMW 516.54 were
+// inflating this table's own totals row (and disagreeing with the Payment
+// Summary cards above it, which already exclude drafts) — so totals below
+// are still always computed with this filter applied. By later request,
+// though, the *rows themselves* stay visible (a cashier needs to be able to
+// see/track/resume a draft from Reports); only the summary numbers exclude
+// them, keeping those accurate without hiding the drafts that produced them.
+const excludeDrafts = (entries) => entries.filter((e) => e.status !== "Draft");
+
+const sumTotals = (entries) =>
+    entries.reduce(
+        (acc, e) => ({
+            total_ht: acc.total_ht + e.total_ht,
+            total_tva: acc.total_tva + e.total_tva,
+            total_ttc: acc.total_ttc + e.total_ttc,
+            pending: acc.pending + e.pending,
+            change: acc.change + (e.change || 0),
+            received: acc.received + e.received,
+        }),
+        { total_ht: 0, total_tva: 0, total_ttc: 0, pending: 0, change: 0, received: 0 }
+    );
+
 const fetchReports = async (terminal, filters) => {
     // Real, terminal-scoped takeposnew data when available (htdocs build with
     // a working legacy session) — see getReportsInRange. Returns null (rather
@@ -148,26 +182,20 @@ const fetchReports = async (terminal, filters) => {
         endDate: toIso(filters.end),
         search: filters.search,
     });
-    if (legacy) return legacy;
+    if (legacy) {
+        // legacy.totals comes straight from the server's own (unfiltered) sum —
+        // recomputed here (drafts excluded) instead of trusting it. entries
+        // itself keeps drafts in, so they still show as rows in the table.
+        return { entries: legacy.entries, totals: sumTotals(excludeDrafts(legacy.entries)) };
+    }
 
     const invoices = await getInvoicesInRange({ startDate: toIso(filters.start), endDate: toIso(filters.end) });
     const term = filters.search.trim().toLowerCase();
-    const entries = invoices
-        .map(mapInvoiceToEntry)
-        .filter((e) => !term || e.ref?.toLowerCase().includes(term) || e.customer?.toLowerCase().includes(term));
-
-    const totals = entries.reduce(
-        (acc, e) => ({
-            total_ht: acc.total_ht + e.total_ht,
-            total_tva: acc.total_tva + e.total_tva,
-            total_ttc: acc.total_ttc + e.total_ttc,
-            pending: acc.pending + e.pending,
-            received: acc.received + e.received,
-        }),
-        { total_ht: 0, total_tva: 0, total_ttc: 0, pending: 0, received: 0 }
+    const entries = invoices.map(mapInvoiceToEntry).filter(
+        (e) => !term || e.ref?.toLowerCase().includes(term) || e.customer?.toLowerCase().includes(term)
     );
 
-    return { entries, totals };
+    return { entries, totals: sumTotals(excludeDrafts(entries)) };
 };
 
 function ReportsModal({ open, onClose }) {
@@ -291,17 +319,9 @@ function ReportsModal({ open, onClose }) {
     // The footer Total row should reflect what's actually visible/filtered in the
     // table, not the unfiltered date-range totals — otherwise a table search that
     // matches 0 rows still showed the old full-range totals, looking broken.
-    const displayTotals = filteredEntries.reduce(
-        (acc, e) => ({
-            total_ht: acc.total_ht + e.total_ht,
-            total_tva: acc.total_tva + e.total_tva,
-            total_ttc: acc.total_ttc + e.total_ttc,
-            pending: acc.pending + e.pending,
-            change: acc.change + e.change,
-            received: acc.received + e.received,
-        }),
-        { total_ht: 0, total_tva: 0, total_ttc: 0, pending: 0, change: 0, received: 0 }
-    );
+    // Drafts stay excluded here too (see excludeDrafts above) even though
+    // filteredEntries itself now includes them as visible rows.
+    const displayTotals = sumTotals(excludeDrafts(filteredEntries));
 
     // Re-clamp the current page whenever the page size or filtered result count changes
     // (e.g. switching from 10 to 100 per page, or narrowing the table search).
@@ -393,7 +413,8 @@ function ReportsModal({ open, onClose }) {
     // Legacy: clicking a Reports row loads that invoice's lines back into the
     // cart as locked items and switches the pay button to settle this invoice
     // (via existing_invoice_id) instead of starting a new sale. Draft invoices
-    // never reach this table (the backend query excludes them); Abandoned
+    // never reach this table (excludeDrafts in fetchReports above strips them
+    // client-side — neither backend endpoint actually excludes them); Abandoned
     // invoices are excluded here client-side to mirror legacy's server-side gate.
     // Invoices with nothing left to pay (entry.pending <= 0 — already fully
     // settled, possibly even overpaid) are excluded too: legacy itself has no
@@ -580,7 +601,7 @@ function ReportsModal({ open, onClose }) {
                                 <div className="shrink-0 flex flex-wrap gap-3">
                                     <div className="flex-1 min-w-[150px] flex flex-col justify-center leading-tight rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 shadow-sm px-4 py-1">
                                         <span className="text-sm text-gray-500 dark:text-slate-400 whitespace-nowrap">Total Invoices</span>
-                                        <span className="text-xl font-bold text-blue-600 whitespace-nowrap">{entries.length}</span>
+                                        <span className="text-xl font-bold text-blue-600 whitespace-nowrap">{excludeDrafts(entries).length}</span>
                                     </div>
                                     <div className="flex-1 min-w-[150px] flex flex-col justify-center leading-tight rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 shadow-sm px-4 py-1">
                                         <span className="text-sm text-gray-500 dark:text-slate-400 whitespace-nowrap">Total Amount</span>
@@ -602,7 +623,7 @@ function ReportsModal({ open, onClose }) {
                                             <span className="flex-1 min-w-0 text-base font-semibold whitespace-nowrap truncate">Total</span>
                                             <div className="w-px h-5 shrink-0 bg-white/20" />
                                             <span className="shrink-0 text-xs font-bold rounded-full bg-white/20 px-2.5 py-1 whitespace-nowrap">
-                                                {entries.length}×
+                                                {excludeDrafts(entries).length}×
                                             </span>
                                         </div>
                                         <div className="h-px bg-white/20" />

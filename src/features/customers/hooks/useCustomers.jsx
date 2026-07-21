@@ -5,10 +5,7 @@ import { isCacheReady, searchCachedCustomers } from "../../../services/posCache"
 const MIN_SEARCH_LENGTH = 2;
 const DEBOUNCE_MS = 250;
 
-// Mirrors legacy's Select2 customer picker config (minimumInputLength: 2,
-// ajax.delay: 250) so typing doesn't fire a request per keystroke. Cache-first
-// once posCache has loaded (instant local filtering, no debounce needed),
-// falling back to a live debounced server call until then.
+
 export const useCustomers = (search = "") => {
     const [customers, setCustomers] = useState([]);
     const [loading, setLoading] = useState(false);

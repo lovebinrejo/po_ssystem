@@ -11,27 +11,12 @@ import CartToast from "./CartToast";
 // Matches legacy's productsPerPage default (pos-app.js: `window.ECUENTA_POS?.productsPerPage || 25`).
 const PRODUCTS_PER_PAGE = 25;
 
-// Mirrors legacy's disablePOSOperations() overlay injected onto .products-grid
-// when no cash session is open for this terminal.
-//
-// This tracks the grid wrapper's actual on-screen position via getBoundingClientRect
-// and renders as `position: fixed` at those exact coordinates, instead of being
-// `absolute`-positioned inside the grid wrapper. Two independent ancestors scroll
-// this app (DashboardLayout's page-level overflow-y-auto AND the grid's own
-// internal scroll area) — an absolutely-positioned overlay nested in either one
-// gets carried away by that ancestor's scroll, exposing unobscured products
-// underneath. `fixed` + a live-tracked rect is immune to that regardless of how
-// many scrollable ancestors exist, while still only covering the grid (not the
-// sidebar/navbar/cart panel), matching legacy's actual scope.
+
 function CashDeskClosedOverlay({ targetRef }) {
     const [rect, setRect] = useState(null);
 
     useEffect(() => {
-        // Continuous rAF tracking instead of event-based recalculation: the wrapper's
-        // size/position can change for reasons that don't fire a 'resize'/'scroll'
-        // event at all (e.g. the skeleton-to-real-grid swap changing content height,
-        // category filtering changing row count) — a live loop is correct regardless
-        // of what caused the change, rather than enumerating every possible trigger.
+        
         let frameId;
         const tick = () => {
             if (targetRef.current) {
@@ -67,9 +52,7 @@ function CashDeskClosedOverlay({ targetRef }) {
     );
 }
 
-// Mirrors legacy's renderPagination(): caps the grid at PRODUCTS_PER_PAGE
-// items with Previous/Next controls, instead of one long scrollable list of
-// every matching product.
+
 function ProductPagination({ page, totalPages, onChange }) {
     if (totalPages <= 1) return null;
 
@@ -127,10 +110,7 @@ function PosHome() {
     const categoryLabels = ["All", ...categories.map((c) => c.label)];
     const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
 
-    // A new category or search term is a brand-new result set — always start
-    // back on page 1 rather than stranding the cashier on, say, page 3 of a
-    // filtered list that might only have 1 page. Reset during render (not an
-    // effect) by comparing against the filter key from the previous render.
+    
     const filterKey = `${selectedCategoryId ?? "all"}::${searchTerm}`;
     const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
     if (filterKey !== prevFilterKey) {

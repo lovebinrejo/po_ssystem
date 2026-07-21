@@ -7,9 +7,7 @@ const scriptUrl = () =>
 
 let loadPromise = null;
 
-// Mirrors legacy's conditional <script src> in takeposnew/index.php — loads
-// the LencoPay inline widget SDK once, lazily, instead of unconditionally on
-// every page load.
+
 const loadLencoScript = () => {
     if (window.LencoPay) return Promise.resolve();
     if (loadPromise) return loadPromise;
@@ -34,10 +32,7 @@ const loadLencoScript = () => {
     return loadPromise;
 };
 
-// Opens Lenco's hosted payment widget (LencoPay.getPaid) — mirrors legacy's
-// openLencoPayWidget() in takeposnew/js/pos-payment-integrated.js. Authenticated
-// with the public key only (safe client-side); no secret key or server call
-// is involved in opening the widget itself.
+
 export const openLencoWidget = async ({
     amount,
     currency,

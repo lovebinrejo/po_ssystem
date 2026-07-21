@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Search, UserPlus, X, ChevronDown, Phone, Mail, IdCard } from "lucide-react";
 import { useCustomers } from "../hooks/useCustomers";
 import usePosStore from "../../pos/stores/posStore";
+import useAuthStore from "../../authentication/stores/authStore";
+import { fetchCustomerById } from "../services/customerApi";
 import AddCustomerModal from "./AddCustomerModal";
 
 const getInitials = (name = "") =>
@@ -19,12 +21,37 @@ function CustomerSelector() {
     const { customers, loading } = useCustomers(query);
     const selectedCustomer = usePosStore((state) => state.selectedCustomer);
     const setSelectedCustomer = usePosStore((state) => state.setSelectedCustomer);
+    const activePlace = usePosStore((state) => state.activePlace);
+    const hasHydrated = usePosStore((state) => state.hasHydrated);
+    const showToast = usePosStore((state) => state.showToast);
+    const defaultCustomerId = useAuthStore((state) => state.terminalConfig?.defaultCustomerId);
     const containerRef = useRef(null);
-    // No auto-selected default customer here by design — the cashier always
-    // sees an empty selector and must explicitly pick someone. There's no
-    // fallback to the terminal's configured default customer at submission
-    // time either (see usePaymentBase.js's `socid`/`requireCustomer`) — a
-    // customer must always be picked for every cart, full stop.
+
+
+    useEffect(() => {
+        const skip = !hasHydrated || !defaultCustomerId || selectedCustomer != null;
+        console.info("[default-customer-sync]", {
+            hasHydrated,
+            activePlace,
+            defaultCustomerId,
+            currentSelectedCustomerId: selectedCustomer?.id ?? null,
+            currentSelectedCustomerName: selectedCustomer?.name ?? null,
+            willFetch: !skip,
+        });
+        if (skip) return;
+        fetchCustomerById(defaultCustomerId)
+            .then((customer) => {
+                console.info("[default-customer-sync] fetchCustomerById resolved:", customer);
+                if (customer) {
+                    setSelectedCustomer(customer);
+                    showToast(`Default customer loaded: ${customer.name}`);
+                }
+            })
+            .catch((err) => {
+                console.warn("[default-customer-sync] fetchCustomerById failed:", err.message);
+                showToast(`Failed to load default customer: ${err.message}`, "error");
+            });
+    }, [hasHydrated, activePlace, selectedCustomer, defaultCustomerId, setSelectedCustomer, showToast]);
 
     useEffect(() => {
         const handleClickOutside = (e) => {

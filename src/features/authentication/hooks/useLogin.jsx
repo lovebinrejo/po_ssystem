@@ -30,6 +30,18 @@ export const useLogin = () => {
             setTerminalConfig(result.terminalConfig);
             stampLoginTime();
 
+            // Prints exactly what this login resolved for the terminal —
+            // default customer, warehouse, and which payment methods have a
+            // bank account configured — so a config change made in Dolibarr
+            // (CASHDESK_ID_* consts) can be confirmed live in devtools
+            // without re-deriving it from the network tab's login response.
+            console.info(`[terminal-config] Terminal ${result.terminalConfig?.terminalNumber}:`, {
+                defaultCustomerId: result.terminalConfig?.defaultCustomerId,
+                warehouseId: result.terminalConfig?.warehouse_id,
+                paymentMethods: result.terminalConfig?.payment_methods,
+                passcodeEnabled: result.terminalConfig?.passcode_enabled,
+            });
+
             return result;
         } catch (err) {
             const message = err.response?.data?.message || "Login failed";
